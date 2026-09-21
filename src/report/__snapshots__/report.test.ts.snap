@@ -13,9 +13,9 @@ exports[`terminal reporter groups by confidence, deterministic first, and shows 
     allowed: contracts, rules
     → invert the call: the service calls the domain, never the reverse
 
-◑ 1 proxy · the check is narrower than the rule
+◑ 1 proxy · the check is narrower than the rule (0 blocking)
 
-  a controller decides nothing                      controllers-stay-thin
+  a controller decides nothing                      controllers-stay-thin (warn)
     services/api/src/routes/event.ts:30
     → move the branch into the domain
 

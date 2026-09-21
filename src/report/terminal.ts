@@ -36,8 +36,14 @@ function renderOne(diagnostic: Diagnostic, dim: Paint): string[] {
   const position = diagnostic.line === undefined ? '' : `:${diagnostic.line}`;
   // padEnd alone collides when the statement is longer than the column, so the gap is explicit.
   const statement = diagnostic.statement.padEnd(50);
+  // Severity is stated per finding, not only per group. Groups are ordered by CONFIDENCE, so a
+  // `warn` rule appears under the deterministic heading beside a blocking one — and a reader who
+  // sees only the ✗ concludes the build is broken when the exit code says it is not. That
+  // misreading lands squarely on the adoption path, where most rules start at `warn`.
+  const blocks = diagnostic.severity === 'error';
+  const tag = blocks ? '' : ` ${dim(`(${diagnostic.severity})`)}`;
   const lines = [
-    `  ${statement}${statement.endsWith(' ') ? '' : '  '}${dim(diagnostic.ruleId)}`,
+    `  ${statement}${statement.endsWith(' ') ? '' : '  '}${dim(diagnostic.ruleId)}${tag}`,
     `    ${diagnostic.file}${position}`,
     `    → ${diagnostic.remedy.summary}`,
   ];
@@ -58,12 +64,19 @@ export function createTerminalReporter(): Reporter {
       for (const confidence of CONFIDENCE_ORDER) {
         const group = groupOf(shown, confidence);
         const mark = MARK[confidence];
-        const heading = `${mark} ${group.length} ${LABEL[confidence]}`;
+        const blockingCount = group.filter((diagnostic) => diagnostic.severity === 'error').length;
+        const suffix =
+          group.length === 0 || blockingCount === group.length
+            ? ''
+            : ` (${blockingCount} blocking)`;
+        const heading = `${mark} ${group.length} ${LABEL[confidence]}${suffix}`;
         if (group.length === 0) {
           out.push(dim(heading));
           continue;
         }
-        out.push(bold(confidence === 'deterministic' ? red(heading) : heading));
+        // Red only when something in the group actually blocks.
+        const blocking = group.some((diagnostic) => diagnostic.severity === 'error');
+        out.push(bold(blocking ? red(heading) : heading));
         out.push('');
         for (const diagnostic of group) {
           out.push(...renderOne(diagnostic, dim));
