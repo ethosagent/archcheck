@@ -5,6 +5,7 @@
     "contracts-know-no-probe",
     "coverage-is-computed-from-rules-alone",
     "emit-reads-contracts-not-probes",
+    "every-error-rule-has-a-fixture",
     "exceptions-are-a-leaf",
     "filenames-are-camel-case-or-kebab",
     "graph-reports-facts-only",

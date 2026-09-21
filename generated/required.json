@@ -1,0 +1,19 @@
+{
+  "$generated": {
+    "by": "archcheck",
+    "doNotEdit": true,
+    "regenerate": "npx archcheck emit",
+    "rules": [
+      "every-error-rule-has-a-fixture"
+    ],
+    "source": "architecture.config.ts"
+  },
+  "rules": [
+    {
+      "expect": "fixtures/rules/{id}.violation.ts",
+      "forEach": "rule[severity=error]",
+      "message": "every error-severity rule has a fixture it is proven to catch — add fixtures/rules/<id>.violation.ts that deliberately breaks this rule — a rule matching nothing passes every build and looks exactly like compliance",
+      "ruleId": "every-error-rule-has-a-fixture"
+    }
+  ]
+}

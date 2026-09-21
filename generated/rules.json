@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "coverage": {
-    "total": 22,
-    "deterministic": 21,
+    "total": 23,
+    "deterministic": 22,
     "proxy": 1,
     "model": 0,
     "automatable": 100
@@ -43,6 +43,15 @@
       "confidence": "deterministic",
       "mark": "✓",
       "remedy": "emit is a pure function of the manifest; move the runtime part to a probe"
+    },
+    {
+      "id": "every-error-rule-has-a-fixture",
+      "kind": "required-file",
+      "statement": "every error-severity rule has a fixture it is proven to catch",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "add fixtures/rules/<id>.violation.ts that deliberately breaks this rule — a rule matching nothing passes every build and looks exactly like compliance"
     },
     {
       "id": "exceptions-are-a-leaf",

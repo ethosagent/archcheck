@@ -261,6 +261,24 @@ export default defineArchitecture({
       },
     },
 
+    // ── the fixture obligation ───────────────────────────────────────────────────────────────
+    {
+      id: 'every-error-rule-has-a-fixture',
+      kind: 'required-file',
+      statement: 'every error-severity rule has a fixture it is proven to catch',
+      severity: 'error',
+      confidence: 'deterministic',
+      params: {
+        forEach: 'rule[severity=error]',
+        expect: 'fixtures/rules/{id}.violation.ts',
+      },
+      remedy: {
+        summary:
+          'add fixtures/rules/<id>.violation.ts that deliberately breaks this rule — a rule ' +
+          'matching nothing passes every build and looks exactly like compliance',
+      },
+    },
+
     // ── naming ───────────────────────────────────────────────────────────────────────────────
     {
       id: 'filenames-are-camel-case-or-kebab',

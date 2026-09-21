@@ -14,7 +14,7 @@ and the percentage goes down, in the same commit.
 
 <!-- archcheck:begin rules-table -->
 
-**22 rules** · ✓ 21 deterministic · ◑ 1 proxy · ○ 0 judgement · **100% automatable**
+**23 rules** · ✓ 22 deterministic · ◑ 1 proxy · ○ 0 judgement · **100% automatable**
 
 | | Rule | Statement | Kind | Severity |
 |---|---|---|---|---|
@@ -22,6 +22,7 @@ and the percentage goes down, in the same commit.
 | ✓ | `contracts-know-no-probe` | a contract kind decides, emits and explains — it never runs anything | layers | error |
 | ✓ | `coverage-is-computed-from-rules-alone` | coverage counts rules and renders a table, and checks nothing | layers | error |
 | ✓ | `emit-reads-contracts-not-probes` | the emitter asks a contract kind for fragments and never runs a probe | layers | error |
+| ✓ | `every-error-rule-has-a-fixture` | every error-severity rule has a fixture it is proven to catch | required-file | error |
 | ✓ | `exceptions-are-a-leaf` | exceptions decide suppression from paths and dates, and run no check | layers | error |
 | ✓ | `filenames-are-camel-case-or-kebab` | a filename is camelCase, or kebab-case when it names a contract kind | naming | error |
 | ✓ | `graph-reports-facts-only` | the graph reader reports facts and evaluates no rule | layers | error |
