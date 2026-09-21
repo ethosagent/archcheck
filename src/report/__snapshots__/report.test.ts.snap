@@ -1,0 +1,27 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`terminal reporter groups by confidence, deterministic first, and shows the remedy 1`] = `
+"✗ 2 deterministic
+
+  domain may not import services                    domain-no-service-import
+    modules/ledger/domain/supersede.ts:4
+    allowed: contracts, rules
+    → invert the call: the service calls the domain, never the reverse
+
+  domain may not import services                    domain-no-service-import
+    modules/ledger/domain/other.ts:12
+    allowed: contracts, rules
+    → invert the call: the service calls the domain, never the reverse
+
+◑ 1 proxy · the check is narrower than the rule
+
+  a controller decides nothing                      controllers-stay-thin
+    services/api/src/routes/event.ts:30
+    → move the branch into the domain
+
+○ 0 advisory
+  1 baselined, not shown          --show-baselined to include
+  - judgement did not run: no credentials in the environment
+  5 rules · 3 deterministic · 1 proxy · 1 advisory
+"
+`;
