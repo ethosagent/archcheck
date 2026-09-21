@@ -42,7 +42,15 @@ import { isSkip, type Probe, type RunCtx } from './probes/types.js';
 import { nextIdLedger } from './registry/ids.js';
 import { open, type Registry } from './registry/index.js';
 import { err, ok, type Result } from './result.js';
-import type { Confidence, Coverage, Diagnostic, RunResult, SkipRecord } from './types.js';
+import type {
+  BaselineEntry,
+  Confidence,
+  ContractKind,
+  Coverage,
+  Diagnostic,
+  RunResult,
+  SkipRecord,
+} from './types.js';
 import { repoRelative } from './util/paths.js';
 
 /** Exit codes are an API. An agent branches on them, so they are frozen from v0.1 (LLD §6). */
@@ -84,9 +92,30 @@ export type CheckOptions = {
   cache?: boolean;
 };
 
-export type EmitResult = { written: { path: string; changed: boolean }[]; ledgerPath: string };
+export type EmitResult = {
+  written: { path: string; changed: boolean }[];
+  ledgerPath: string;
+  /**
+   * Rule kinds this version generated no configuration for. Carried here because `emit` has no
+   * `skipped` channel, so a programmatic caller has nowhere else to learn it — the CLI says the
+   * same thing through `describeUnimplemented` (src/emit/index.ts), which also has to serve the
+   * `--check` path, where there is no `EmitResult`.
+   */
+  unimplemented: ContractKind[];
+};
 
-export type BaselineOutcome = { path: string; entries: number; removed: number };
+export type BaselineOutcome = {
+  path: string;
+  entries: number;
+  removed: number;
+  /**
+   * Entries that survived with a LOWER recorded count than before. `--prune` tightens the ratchet
+   * two ways, and only `removed` was visible: a prune that fixed one of two occurrences reported
+   * "pruned 0 entries" and read as having done nothing. Pinned by 'a prune that only reduced a
+   * count says so, rather than reporting nothing' in tests/adoption.test.ts.
+   */
+  reduced: number;
+};
 
 export type ArchCheck = {
   readonly registry: Registry;
@@ -172,6 +201,13 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
 
       const inputs: NormalizeInput[] = [];
       const skipped: SkipRecord[] = [];
+      /**
+       * The kinds this run did NOT evaluate, collected where the skip is recorded rather than
+       * parsed back out of `SkipRecord.probe` — including the `'<kind> rules'` skips below, which
+       * name a kind no probe implements. A baseline entry whose rule has one of these kinds cannot
+       * be judged; every other entry still can. See `baselineStale`.
+       */
+      const unjudgedKinds = new Set<ContractKind>();
 
       if (checkOptions.writeGraph === true) {
         const graph = ctx.graph();
@@ -201,13 +237,16 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
               probe: probe.name,
               reason: `cannot ingest ${GRAPH_REPORT_PATH}: ${(error as Error).message}`,
             });
+            for (const kind of probe.handles) unjudgedKinds.add(kind);
             continue;
           }
         }
 
         const outcome = await probe.run(ctx);
-        if (isSkip(outcome)) skipped.push({ probe: probe.name, reason: outcome.reason });
-        else inputs.push({ findings: outcome, detectedBy: probe.name });
+        if (isSkip(outcome)) {
+          skipped.push({ probe: probe.name, reason: outcome.reason });
+          for (const kind of probe.handles) unjudgedKinds.add(kind);
+        } else inputs.push({ findings: outcome, detectedBy: probe.name });
       }
 
       // A kind nobody handles is stated, never silently passed over: "declared, not checked yet"
@@ -219,6 +258,7 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
             probe: `${kind} rules`,
             reason: 'no probe in this version handles this kind',
           });
+          unjudgedKinds.add(kind);
         }
       }
 
@@ -232,19 +272,48 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
 
       const today = checkOptions.today ?? todayIso();
       const applied = applyExceptions(registry.exceptions(), normalized.value, today);
-      const diagnostics = applied.diagnostics;
 
-      // The ratchet's second half. Only a run that looked at everything can judge it: a diff-scoped
-      // run evaluates a fraction of the repo, a tier-scoped run a fraction of the rules, and a run
-      // with a SKIPPED probe read nothing that probe reads — in all three "did not reproduce" would
-      // mean "was not looked at". Pinned by the three 'does not judge the baseline' tests in
+      // Counts come from the baseline FILE, so they apply only where the identities did too: an
+      // explicitly injected `baselined` set carries no counts, and pairing it with the file's would
+      // judge one run against another's numbers.
+      const recorded =
+        checkOptions.baselined === undefined
+          ? new Map(baseline.entries.map((entry) => [entry.identity, entry.occurrences]))
+          : new Map<string, number>();
+
+      // The count half of the ratchet. An identity can stand for several violations — evidence
+      // holds no position, so a third empty catch in a file hashes exactly like the first two
+      // (`computeIdentity`, src/normalize/identity.ts). More occurrences than the baseline recorded
+      // is therefore NEW debt, and saying so as `baselined: false` means every reporter and
+      // `exitCodeFor` already handle it: it fails as exit 1, like any other new violation. Pinned
+      // by 'a THIRD occurrence in a file the baseline recorded twice still fails' in
       // tests/adoption.test.ts.
+      const diagnostics = applied.diagnostics.map((diagnostic) => {
+        const recordedCount = recorded.get(diagnostic.identity);
+        return diagnostic.baselined &&
+          recordedCount !== undefined &&
+          (diagnostic.occurrences ?? 1) > recordedCount
+          ? { ...diagnostic, baselined: false }
+          : diagnostic;
+      });
+
+      // The ratchet's second half, and only a run that looked can judge it. A diff-scoped run
+      // evaluates a fraction of the REPO and a tier-scoped run a fraction of the RULES, so neither
+      // judges anything — pinned by the two 'does not judge the baseline' tests in
+      // tests/adoption.test.ts. A skipped probe is narrower than either: it blinds this run to the
+      // KINDS that probe evaluates and to nothing else, so an entry whose rule no skipped probe
+      // would have touched is still judged ('a skipped probe suppresses staleness only for the
+      // rules it would have judged'). An entry naming a rule the manifest no longer defines has no
+      // kind to blind, and stays judged, as it was before.
+      const judgeable = (entry: BaselineEntry): boolean => {
+        const kind = registry.byId(entry.ruleId)?.kind;
+        return kind === undefined || !unjudgedKinds.has(kind);
+      };
       const baselineStale =
         checkOptions.changed === undefined &&
         checkOptions.baselined === undefined &&
-        checkOptions.only === undefined &&
-        skipped.length === 0
-          ? staleEntries(baseline, diagnostics)
+        checkOptions.only === undefined
+          ? staleEntries(baseline, diagnostics).filter(judgeable)
           : [];
 
       return ok({
@@ -285,16 +354,22 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
           ? nextBaseline(previous, run.value.diagnostics, todayIso())
           : prunedBaseline(previous, run.value.diagnostics);
       const path = writeBaseline(registry.root, next);
+      // `--write` takes today's count too, so it can reduce one as well; both modes report it.
+      const before = new Map(previous.entries.map((entry) => [entry.identity, entry.occurrences]));
       return ok({
         path,
         entries: next.entries.length,
         removed: previous.entries.length - next.entries.length,
+        reduced: next.entries.filter(
+          (entry) => entry.occurrences < (before.get(entry.identity) ?? entry.occurrences),
+        ).length,
       });
     },
 
     emit(): Result<EmitResult> {
-      const outcome = applyEmit(plan(), nextIdLedger(registry.ledger(), registry.all()));
-      return ok(outcome);
+      const emitPlan = plan();
+      const outcome = applyEmit(emitPlan, nextIdLedger(registry.ledger(), registry.all()));
+      return ok({ ...outcome, unimplemented: emitPlan.unimplemented });
     },
 
     emitCheck(): Result<StaleFile[]> {
@@ -350,14 +425,21 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
   });
 }
 
-/** What `explain` appends once the run has happened — the live violation count. */
+/**
+ * What `explain` appends once the run has happened — the live violation count. It counts
+ * OCCURRENCES, not diagnostics: an agent asking "how many" means how many places to fix, and one
+ * diagnostic can stand for several (see `Diagnostic.occurrences`).
+ */
 export function describeViolations(ruleId: string, diagnostics: readonly Diagnostic[]): string {
   const mine = diagnostics.filter((d) => d.ruleId === ruleId);
   if (mine.length === 0) return '  violations: none right now';
-  const lines = [`  violations: ${mine.length}`];
+  const total = mine.reduce((sum, d) => sum + (d.occurrences ?? 1), 0);
+  const lines = [`  violations: ${total}`];
   for (const diagnostic of mine.slice(0, 10)) {
+    const occurrences = diagnostic.occurrences ?? 1;
     lines.push(
-      `    ${diagnostic.file}${diagnostic.line === undefined ? '' : `:${diagnostic.line}`}`,
+      `    ${diagnostic.file}${diagnostic.line === undefined ? '' : `:${diagnostic.line}`}` +
+        (occurrences > 1 ? ` ×${occurrences}` : ''),
     );
   }
   if (mine.length > 10) lines.push(`    … and ${mine.length - 10} more`);

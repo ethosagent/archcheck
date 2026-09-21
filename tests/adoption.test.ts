@@ -117,6 +117,50 @@ export const alsoBad = appendEntry;
     });
   });
 
+  test('a THIRD occurrence in a file the baseline recorded twice still fails', () => {
+    inCopyOf('lint', (root) => {
+      // Two empty catches in one file. Their evidence is identical BY CONSTRUCTION — the snippet
+      // is the literal `catch {}` both times — so they are ONE identity and one baseline entry.
+      const path = join(root, 'src', 'rules', 'swallow.ts');
+      const swallow = (n: number) =>
+        `export function swallow${n}(): void {\n  try {\n    JSON.parse('{}');\n  } catch {}\n}\n`;
+      writeFileSync(path, `${swallow(1)}${swallow(2)}`);
+
+      expect(archcheck(['baseline', '--write'], root).code).toBe(0);
+      expect(archcheck([], root).code).toBe(0);
+
+      // A third one. Same identity, so the entry covers it — unless the count is part of the
+      // ratchet, which is the bug: one entry would suppress every future occurrence in the file.
+      writeFileSync(path, `${swallow(1)}${swallow(2)}${swallow(3)}`);
+      const run = archcheck([], root);
+      expect(run.code).toBe(1);
+      expect(run.stdout).toContain('3 occurrences');
+    });
+  });
+
+  test('a prune that only reduced a count says so, rather than reporting nothing', () => {
+    inCopyOf('lint', (root) => {
+      // Same two-empty-catch file as above: one identity, one entry, recorded as 2 occurrences.
+      const path = join(root, 'src', 'rules', 'swallow.ts');
+      const swallow = (n: number) =>
+        `export function swallow${n}(): void {\n  try {\n    JSON.parse('{}');\n  } catch {}\n}\n`;
+      writeFileSync(path, `${swallow(1)}${swallow(2)}`);
+      expect(archcheck(['baseline', '--write'], root).code).toBe(0);
+
+      // Fix ONE of the two. The identity still reproduces, so `--prune` drops no entry at all — it
+      // only ratchets the recorded count down from 2 to 1, and the outcome has to say that
+      // happened (`BaselineOutcome.reduced`, src/archcheck.ts).
+      writeFileSync(path, swallow(1));
+      expect(archcheck([], root).code).toBe(4);
+
+      const pruned = archcheck(['baseline', '--prune'], root);
+      expect(pruned.code).toBe(0);
+      expect(pruned.stdout).toContain('pruned 0 entries');
+      expect(pruned.stdout).toContain('reduced 1 count');
+      expect(archcheck([], root).code).toBe(0);
+    });
+  });
+
   test('a FIXED baselined violation exits 4 until pruned, and names the command', () => {
     inCopyOf('layered', (root) => {
       archcheck(['baseline', '--write'], root);
@@ -168,6 +212,86 @@ export const alsoBad = appendEntry;
       const run = archcheck([], root);
       expect(run.stdout).toContain('graph did not run');
       expect(run.code).toBe(0);
+    });
+  });
+
+  test('a skipped probe suppresses staleness only for the rules it would have judged', () => {
+    inCopyOf('layered', (root) => {
+      // A `forbidden` rule: no probe in this version handles that kind, so every run is degraded.
+      // It says nothing whatsoever about the deterministic `layers` rules, which the graph probe
+      // did evaluate — so a layers entry that really was fixed must still reach exit 4.
+      const config = join(root, 'architecture.config.ts');
+      writeFileSync(
+        config,
+        readFileSync(config, 'utf8').replace(
+          '  ],\n});',
+          `    {
+      id: 'no-cross-module-import',
+      kind: 'forbidden' as const,
+      statement: 'one module does not reach into another',
+      severity: 'error' as const,
+      confidence: 'deterministic' as const,
+      params: { from: 'modules/ledger/**', to: 'modules/other/**' },
+      remedy: { summary: 'go through the barrel' },
+    },
+  ],
+});`,
+        ),
+      );
+      archcheck(['baseline', '--write'], root);
+      expect(archcheck([], root).stdout).toContain('forbidden rules did not run');
+
+      // Remove the illegal import entirely, exactly as the exit-4 test above does.
+      const path = join(root, violatingFile);
+      writeFileSync(
+        path,
+        readFileSync(path, 'utf8')
+          .replace("import { writeEntry } from '../services/write.js';\n", '')
+          .replace('  await writeEntry({ ...next, supersedes: previous.id });', '  void previous;'),
+      );
+
+      const run = archcheck([], root);
+      expect(run.code).toBe(4);
+      expect(run.stdout).toContain('no longer reproduce');
+    });
+  });
+
+  test('an entry whose KIND no probe implements is not judged either', () => {
+    inCopyOf('layered', (root) => {
+      // The other half of the test above. That skip record names a KIND rather than a probe
+      // (`'<kind> rules'`), and an entry for such a rule can never reproduce — so judging it would
+      // exit 4 for ever, with `--prune` refusing because the run is degraded.
+      const config = join(root, 'architecture.config.ts');
+      writeFileSync(
+        config,
+        readFileSync(config, 'utf8').replace(
+          '  ],\n});',
+          `    {
+      id: 'no-cross-module-import',
+      kind: 'forbidden' as const,
+      statement: 'one module does not reach into another',
+      severity: 'error' as const,
+      confidence: 'deterministic' as const,
+      params: { from: 'modules/ledger/**', to: 'modules/other/**' },
+      remedy: { summary: 'go through the barrel' },
+    },
+  ],
+});`,
+        ),
+      );
+      archcheck(['baseline', '--write'], root);
+
+      const path = join(root, '.archcheck', 'baseline.json');
+      const baseline = JSON.parse(readFileSync(path, 'utf8'));
+      baseline.entries.push({
+        identity: 'f0f0f0f0f0f0f0f0',
+        ruleId: 'no-cross-module-import',
+        addedAt: '2026-01-01',
+        occurrences: 1,
+      });
+      writeFileSync(path, JSON.stringify(baseline, null, 2));
+
+      expect(archcheck([], root).code).toBe(0);
     });
   });
 

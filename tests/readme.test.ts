@@ -375,6 +375,37 @@ describe('the README’s quick start', () => {
   });
 });
 
+describe('the occurrence count the README documents', () => {
+  const fromCode = section('## Use archcheck from code');
+
+  test('it names both fields the agent contract carries', () => {
+    expect(unwrapped(fromCode)).toContain('`occurrences`');
+    expect(unwrapped(fromCode)).toContain('`occurrenceLines`');
+  });
+
+  test('it states the adoption consequence, so a reader does not read one entry as one violation', () => {
+    expect(unwrapped(fromCode)).toContain('The baseline records the count');
+    expect(unwrapped(fromCode)).toContain('still fails');
+  });
+
+  test('a json diagnostic really carries both, with the collapse the README describes', () => {
+    inExampleCopy((root) => {
+      // Two identical console calls in one file. Evidence holds no position, so both hash to one
+      // identity (`computeIdentity`, src/normalize/identity.ts) — which is the collapse the section
+      // describes, seen exactly as an agent sees it.
+      const path = join(root, 'src', 'domain', 'decide.ts');
+      writeFileSync(
+        path,
+        `${readFileSync(path, 'utf8')}\nexport const shout = (m: string): void => {\n  console.log(m);\n  console.log(m);\n};\n`,
+      );
+      const json = JSON.parse(archcheck(['--format', 'json'], root).stdout);
+      expect(json.diagnostics).toHaveLength(1);
+      expect(json.diagnostics[0].occurrences).toBe(2);
+      expect(json.diagnostics[0].occurrenceLines).toHaveLength(2);
+    });
+  });
+});
+
 describe('the judgement tier claims', () => {
   const tier = section('## The judgement tier (optional)');
   const COUNT_WORD: Record<string, number> = { three: 3, four: 4, five: 5, six: 6 };

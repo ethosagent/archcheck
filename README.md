@@ -459,6 +459,12 @@ if (run.ok) {
 
 An agent hook does not shell out. Every result is typed, and no call throws.
 
+Several violations of one rule in one file collapse into one finding. The `occurrences` field says
+how many violations collapsed into it. The `occurrenceLines` field says which lines they are on. The
+baseline records the count, so a new occurrence in a file the baseline already covers still fails.
+The hash does not change: the evidence holds no line number, and the count stays out of the
+evidence. No baseline file you already have becomes invalid.
+
 ---
 
 ## How archcheck reads your code

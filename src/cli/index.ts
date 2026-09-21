@@ -154,10 +154,14 @@ async function runBaseline(args: ParsedArgs, cwd: string): Promise<ExitCode> {
   if (!loaded.ok) return fail(loaded.error, EXIT.config);
   const outcome = await loaded.value.baseline(args.baselineMode ?? 'write');
   if (!outcome.ok) return fail(outcome.error, EXIT.config);
-  const { path, entries, removed } = outcome.value;
+  const { path, entries, removed, reduced } = outcome.value;
+  // Both halves of the ratchet, on one line: a prune that drops nothing and only lowers a recorded
+  // count has still tightened it, and `removed` alone reported that as having done nothing
+  // (`BaselineOutcome.reduced`, src/archcheck.ts).
   console.log(
     args.baselineMode === 'prune'
-      ? `pruned ${removed} entr${removed === 1 ? 'y' : 'ies'} — ${entries} remaining in ${path}`
+      ? `pruned ${removed} entr${removed === 1 ? 'y' : 'ies'}, reduced ${reduced} ` +
+          `count${reduced === 1 ? '' : 's'} — ${entries} remaining in ${path}`
       : `recorded ${entries} entr${entries === 1 ? 'y' : 'ies'} in ${path}`,
   );
   if (args.baselineMode === 'write' && entries > 0) {
