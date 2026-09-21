@@ -182,7 +182,13 @@ describe('--format routes to the right reporter', () => {
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.skipped).toEqual([]);
     expect(parsed.diagnostics).toHaveLength(2);
-    expect(parsed.coverage).toEqual({ total: 5, deterministic: 5, proxy: 0, model: 0 });
+    expect(parsed.coverage).toEqual({
+      total: 5,
+      deterministic: 5,
+      proxy: 0,
+      model: 0,
+      unchecked: 0,
+    });
   });
 
   test('every diagnostic carries a 16-character identity', () => {

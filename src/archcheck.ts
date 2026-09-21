@@ -118,6 +118,7 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
     configPath: options.configPath,
     validateParams: validateParamsByKind,
     collectWarnings: warningsFor,
+    isCheckable: (rule) => contractFor(rule.kind) !== undefined,
     skipIdCheck: options.skipIdCheck,
   });
   if (!opened.ok) return opened;

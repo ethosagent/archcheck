@@ -101,6 +101,24 @@ describe('id immutability', () => {
 });
 
 describe('coverage', () => {
+  test('a rule of a kind nothing checks is counted apart, and the percentage falls', () => {
+    const opened = open({
+      configPath: config('valid'),
+      validateParams: anyParams,
+      // The facade injects this from the contract registry. Here: judgement is not checkable.
+      isCheckable: (rule) => rule.kind !== 'judgement',
+    });
+    expect(opened.ok).toBe(true);
+    if (!opened.ok) return;
+    expect(opened.value.coverage()).toEqual({
+      total: 2,
+      deterministic: 1,
+      proxy: 0,
+      model: 0,
+      unchecked: 1,
+    });
+  });
+
   test('is counted from the manifest, and excludes rules switched off', () => {
     const opened = open({ configPath: config('valid'), validateParams: anyParams });
     expect(opened.ok).toBe(true);
@@ -111,6 +129,8 @@ describe('coverage', () => {
       deterministic: 1,
       proxy: 0,
       model: 1,
+      // The registry's default is "every kind is checkable"; the facade injects the truth.
+      unchecked: 0,
     });
   });
 });

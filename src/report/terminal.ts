@@ -128,10 +128,11 @@ export function createTerminalReporter(): Reporter {
         out.push(yellow(`  - ${skip.probe} did not run: ${skip.reason}`));
       }
 
-      const { total, deterministic, proxy, model } = result.coverage;
+      const { total, deterministic, proxy, model, unchecked } = result.coverage;
       out.push(
         dim(
-          `  ${total} rules · ${deterministic} deterministic · ${proxy} proxy · ${model} advisory`,
+          `  ${total} rules · ${deterministic} deterministic · ${proxy} proxy · ${model} advisory` +
+            (unchecked > 0 ? ` · ${unchecked} unchecked` : ''),
         ),
       );
 

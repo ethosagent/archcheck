@@ -156,10 +156,13 @@ function runCoverage(cwd: string): ExitCode {
   const loaded = load({ cwd });
   if (!loaded.ok) return fail(loaded.error, EXIT.config);
   const coverage = loaded.value.coverage();
-  const { total, deterministic, proxy, model } = coverage;
+  const { total, deterministic, proxy, model, unchecked } = coverage;
   console.log(`${MARK.deterministic} ${deterministic} deterministic`);
   console.log(`${MARK.proxy} ${proxy} proxy`);
   console.log(`${MARK.model} ${model} judgement`);
+  if (unchecked > 0) {
+    console.log(`  ${unchecked} declared, but no version of archcheck checks their kind yet`);
+  }
   console.log(`  ${total} rules total · ${automatablePercent(coverage)}% automatable`);
   return EXIT.clean;
 }

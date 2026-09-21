@@ -33,7 +33,13 @@ export type RulesDocument = {
   rules: RuleSummary[];
 };
 
-/** `deterministic + proxy` over the total: the share a machine decides without a model. */
+/**
+ * `deterministic + proxy` over the TOTAL: the share a machine decides without a model.
+ *
+ * The denominator is every active rule, including the ones nothing checks. Declare a rule of a
+ * kind archcheck has not implemented and the percentage falls, which is the whole point of
+ * computing this number rather than writing it down.
+ */
 export function automatablePercent(coverage: Coverage): number {
   if (coverage.total === 0) return 0;
   return Math.round(((coverage.deterministic + coverage.proxy) / coverage.total) * 100);

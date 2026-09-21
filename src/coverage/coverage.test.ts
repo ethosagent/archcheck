@@ -30,16 +30,21 @@ const coverageOf = (rules: Rule[]): Coverage => {
     deterministic: active.filter((r) => r.confidence === 'deterministic').length,
     proxy: active.filter((r) => r.confidence === 'proxy').length,
     model: active.filter((r) => r.confidence === 'model').length,
+    unchecked: 0,
   };
 };
 
 describe('coverage cannot be claimed', () => {
   test('the percentage is deterministic + proxy over the total', () => {
-    expect(automatablePercent({ total: 4, deterministic: 2, proxy: 1, model: 1 })).toBe(75);
+    expect(
+      automatablePercent({ total: 4, deterministic: 2, proxy: 1, model: 1, unchecked: 0 }),
+    ).toBe(75);
   });
 
   test('an empty manifest is 0%, not a division by zero', () => {
-    expect(automatablePercent({ total: 0, deterministic: 0, proxy: 0, model: 0 })).toBe(0);
+    expect(
+      automatablePercent({ total: 0, deterministic: 0, proxy: 0, model: 0, unchecked: 0 }),
+    ).toBe(0);
   });
 
   test('adding a JUDGEMENT rule moves the percentage DOWN', () => {
@@ -80,6 +85,7 @@ describe('rules.json', () => {
       deterministic: 1,
       proxy: 0,
       model: 1,
+      unchecked: 0,
       automatable: 50,
     });
   });

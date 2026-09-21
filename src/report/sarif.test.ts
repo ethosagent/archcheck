@@ -38,7 +38,7 @@ const RESULT: RunResult = {
     diagnostic({ identity: 'eeeeeeeeeeeeeeee', exempted: true }),
   ],
   skipped: [{ probe: 'judgement', reason: 'no credentials' }],
-  coverage: { total: 3, deterministic: 2, proxy: 0, model: 1 },
+  coverage: { total: 3, deterministic: 2, proxy: 0, model: 1, unchecked: 0 },
   baselineStale: [],
   exceptions: [],
 };

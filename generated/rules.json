@@ -5,6 +5,7 @@
     "deterministic": 23,
     "proxy": 1,
     "model": 0,
+    "unchecked": 0,
     "automatable": 100
   },
   "rules": [

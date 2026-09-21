@@ -151,6 +151,13 @@ export type Coverage = {
   deterministic: number;
   proxy: number;
   model: number;
+  /**
+   * Rules whose KIND no version of archcheck checks yet. Counted apart from the three tiers on
+   * purpose: the tier a rule declares is a claim by its author, and for an unimplemented kind
+   * archcheck knows that claim is wrong whatever the manifest says. Folding these into
+   * `deterministic` would inflate the one number nobody is supposed to be able to inflate.
+   */
+  unchecked: number;
 };
 
 /** A probe that did not run. Present even when empty: "clean" must be distinguishable. */

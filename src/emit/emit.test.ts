@@ -41,7 +41,13 @@ function plan(root: string, rules: readonly Rule[] = RULES) {
     root,
     configPath: join(root, 'architecture.config.ts'),
     rules,
-    coverage: { total: rules.length, deterministic: rules.length, proxy: 0, model: 0 },
+    coverage: {
+      total: rules.length,
+      deterministic: rules.length,
+      proxy: 0,
+      model: 0,
+      unchecked: 0,
+    },
     contractFor,
   });
 }

@@ -40,6 +40,7 @@ function createRegistry(
   loaded: LoadedManifest,
   ledger: IdLedger,
   warnings: readonly string[],
+  isCheckable: (rule: Rule) => boolean,
 ): Registry {
   const rules = loaded.manifest.rules;
   const byId = new Map(rules.map((rule) => [rule.id, rule]));
@@ -54,13 +55,15 @@ function createRegistry(
     byKind: (kind) => rules.filter((rule) => rule.kind === kind),
     coverage: () => {
       const active = rules.filter((rule) => rule.severity !== 'off');
+      const checkable = active.filter(isCheckable);
       const count = (confidence: Rule['confidence']) =>
-        active.filter((rule) => rule.confidence === confidence).length;
+        checkable.filter((rule) => rule.confidence === confidence).length;
       return {
         total: active.length,
         deterministic: count('deterministic'),
         proxy: count('proxy'),
         model: count('model'),
+        unchecked: active.length - checkable.length,
       };
     },
     exceptions: () => loaded.manifest.exceptions ?? [],
@@ -77,6 +80,12 @@ export type OpenOptions = {
   validateParams: ParamsValidator;
   /** Kind-specific load-time warnings, injected the same way. */
   collectWarnings?: (rules: readonly Rule[]) => string[];
+  /**
+   * Whether archcheck can check this rule's kind at all. Injected, because the registry knows a
+   * rule has a kind and must never learn what a kind means. Defaults to "yes" so the registry
+   * stays testable with no contract kind present.
+   */
+  isCheckable?: (rule: Rule) => boolean;
   /** Skip the id-immutability ledger. Only `emit` and tests have a reason to. */
   skipIdCheck?: boolean;
 };
@@ -100,7 +109,14 @@ export function open(options: OpenOptions): Result<Registry> {
     if (!immutable.ok) return err(immutable.error);
   }
 
-  return ok(createRegistry(loaded, ledger, options.collectWarnings?.(loaded.manifest.rules) ?? []));
+  return ok(
+    createRegistry(
+      loaded,
+      ledger,
+      options.collectWarnings?.(loaded.manifest.rules) ?? [],
+      options.isCheckable ?? (() => true),
+    ),
+  );
 }
 
 export { type ArchitectureManifest, defineArchitecture } from './define.js';

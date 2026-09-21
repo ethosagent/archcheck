@@ -53,7 +53,7 @@ const FIXED: RunResult = {
     }),
   ],
   skipped: [{ probe: 'judgement', reason: 'no credentials in the environment' }],
-  coverage: { total: 5, deterministic: 3, proxy: 1, model: 1 },
+  coverage: { total: 5, deterministic: 3, proxy: 1, model: 1, unchecked: 0 },
   baselineStale: [],
   exceptions: [],
 };
@@ -100,7 +100,7 @@ describe('terminal reporter', () => {
       ok: true,
       diagnostics: [],
       skipped: [],
-      coverage: { total: 5, deterministic: 5, proxy: 0, model: 0 },
+      coverage: { total: 5, deterministic: 5, proxy: 0, model: 0, unchecked: 0 },
       baselineStale: [],
       exceptions: [],
     };
@@ -136,7 +136,7 @@ describe('json reporter', () => {
       ok: true,
       diagnostics: [],
       skipped: [],
-      coverage: { total: 0, deterministic: 0, proxy: 0, model: 0 },
+      coverage: { total: 0, deterministic: 0, proxy: 0, model: 0, unchecked: 0 },
       baselineStale: [],
       exceptions: [],
     };

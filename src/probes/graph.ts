@@ -185,7 +185,11 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
 export function createGraphProbe(): Probe {
   return {
     name: 'graph',
-    handles: ['layers', 'forbidden', 'encapsulation'],
+    // `forbidden` is NOT here, although the graph is where it would live. This probe evaluates
+    // `layers` and `encapsulation` and nothing else, and a probe that claims a kind it ignores
+    // turns a declared rule into a silent pass: the run reports no skip, says "nothing to fix",
+    // and counts the rule as checked. `handles` is a promise, so it has to be true.
+    handles: ['layers', 'encapsulation'],
 
     async run(ctx: RunCtx): Promise<RawFinding[] | Skip> {
       const graph = ctx.graph();
