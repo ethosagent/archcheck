@@ -13,21 +13,64 @@ import { readFileSync } from 'node:fs';
 import { err, ok, type Result } from '../result.js';
 import type { Rule } from '../types.js';
 
-export type IdLedger = { schemaVersion: 1; ids: string[] };
+export type IdLedger = {
+  schemaVersion: 1;
+  ids: string[];
+  /**
+   * Set when a ledger file exists but could not be understood, and holds the whole message to
+   * print. `checkIdImmutability` refuses to run against it, and the CLI refuses to let `emit`
+   * rebuild it: an empty `ids` list would otherwise read as "no id has ever been committed",
+   * which passes every rename. `tests/cli.test.ts` → 'a corrupt id ledger' pins both paths.
+   */
+  unreadable?: string;
+};
 
 export const ID_LEDGER_PATH = '.archcheck/ids.json';
 
+function unreadableLedger(path: string, reason: string): IdLedger {
+  return {
+    schemaVersion: 1,
+    ids: [],
+    unreadable: [
+      `the id ledger ${path} exists but could not be read: ${reason}`,
+      '  → restore it from version control, or delete it and re-run `npx archcheck emit`',
+      '  an empty ledger would read as "no id has ever been committed", which passes every rename',
+    ].join('\n'),
+  };
+}
+
 export function readIdLedger(path: string): IdLedger {
+  let source: string;
   try {
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
-    if (typeof parsed !== 'object' || parsed === null) return { schemaVersion: 1, ids: [] };
-    const ids = (parsed as { ids?: unknown }).ids;
-    if (!Array.isArray(ids)) return { schemaVersion: 1, ids: [] };
-    return { schemaVersion: 1, ids: ids.filter((id): id is string => typeof id === 'string') };
-  } catch {
-    // No ledger yet is the normal first-run state, not a failure.
-    return { schemaVersion: 1, ids: [] };
+    source = readFileSync(path, 'utf8');
+  } catch (error) {
+    // No ledger yet is the normal first-run state, not a failure. Anything else — a directory in
+    // its place, a permission error — is one, and must not borrow the first-run answer.
+    if ((error as { code?: string }).code === 'ENOENT') return { schemaVersion: 1, ids: [] };
+    return unreadableLedger(path, error instanceof Error ? error.message : String(error));
   }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch (error) {
+    return unreadableLedger(path, error instanceof Error ? error.message : String(error));
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return unreadableLedger(path, 'its top level is not a JSON object');
+  }
+  const listed = (parsed as { ids?: unknown }).ids;
+  if (!Array.isArray(listed)) return unreadableLedger(path, 'it has no `ids` array');
+
+  const ids: string[] = [];
+  for (const id of listed as readonly unknown[]) {
+    // Dropping a malformed entry would silently shrink the ledger, which is the same failure as
+    // not reading it at all.
+    if (typeof id !== 'string')
+      return unreadableLedger(path, '`ids` holds an entry that is not a string');
+    ids.push(id);
+  }
+  return { schemaVersion: 1, ids };
 }
 
 /** The ledger `emit` should write: every id ever seen, plus today's, sorted and deduplicated. */
@@ -38,6 +81,9 @@ export function nextIdLedger(previous: IdLedger, rules: readonly Rule[]): IdLedg
 }
 
 export function checkIdImmutability(rules: readonly Rule[], ledger: IdLedger): Result<void> {
+  // A ledger nobody can read proves nothing, so it fails the load rather than passing it.
+  if (ledger.unreadable !== undefined) return err([ledger.unreadable]);
+
   const present = new Set(rules.map((r) => r.id));
   const superseded = new Set(rules.map((r) => r.replaces).filter((r): r is string => Boolean(r)));
 
