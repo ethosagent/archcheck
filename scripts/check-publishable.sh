@@ -12,8 +12,11 @@
 #
 # Nothing here publishes and nothing here needs auth. `--dry-run` writes no .tgz, so the gate
 # leaves no artifact in the repo; the listing goes to a temp file the trap removes.
-# `--ignore-scripts` is required, not cosmetic: the `prepare` script (lefthook install) writes
-# to stdout, and npm runs it for `npm pack`, which corrupts `--json` output.
+# `--ignore-scripts` is a belt, not the braces. npm runs `prepare` for `npm pack`, and anything
+# `prepare` prints to stdout lands in this listing ahead of the JSON and breaks the parse below.
+# The flag alone was not enough: it held on npm 11 locally and the Linux CI runner ran `prepare`
+# regardless, so the gate went red on a tree that was green here. The real guard is that
+# `prepare` in package.json is silent — keep it that way, and keep this flag as well.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

@@ -42,7 +42,7 @@
     "emit": "bun run src/cli/index.ts emit",
     "emit:check": "bash scripts/check-emit.sh",
     "format": "biome format --write .",
-    "prepare": "lefthook install || true",
+    "prepare": "lefthook install >/dev/null 2>&1 || true",
     "prepublishOnly": "bun run build && bun run check"
   },
   "peerDependenciesMeta": {

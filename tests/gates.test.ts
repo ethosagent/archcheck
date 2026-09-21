@@ -129,4 +129,24 @@ describe('check-publishable.sh', () => {
     },
     PACK_TIMEOUT_MS,
   );
+
+  // Deliberately WITHOUT --ignore-scripts, which is what the gate passes. npm runs `prepare` for
+  // `npm pack`, and the Linux CI runner ran it even with the flag, so anything `prepare` printed
+  // to stdout landed ahead of the JSON and the gate died parsing it — red on CI, green here. This
+  // asserts the property that actually holds on both: packing this repo yields parseable JSON no
+  // matter what npm decides about scripts. It fails the moment a lifecycle script gets chatty.
+  test(
+    'packs to parseable JSON even when npm runs the lifecycle scripts',
+    () => {
+      const listing = execFileSync('npm', ['pack', '--dry-run', '--json'], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const packed = JSON.parse(listing);
+      expect(Array.isArray(packed)).toBe(true);
+      expect(packed[0]?.files?.length ?? 0).toBeGreaterThan(0);
+    },
+    PACK_TIMEOUT_MS,
+  );
 });
