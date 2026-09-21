@@ -1,0 +1,31 @@
+/**
+ * `defineArchitecture` — the one function a manifest calls.
+ *
+ * What this is for: giving `architecture.config.ts` a type without giving it any runtime
+ * behaviour. It is an identity function on purpose. A manifest that ran logic at load time would
+ * be a program pretending to be a declaration, and the whole value of the manifest is that it can
+ * be read by a person, a generator and a diff.
+ *
+ * What a caller must know: nothing here validates. Validation is total and lives in
+ * `validate.ts`, because it must be able to return every problem at once rather than throwing on
+ * the first (a malformed manifest exits 2, not 1).
+ */
+import type { Rule } from '../types.js';
+
+export type ArchitectureManifest = {
+  /**
+   * The repository root every path in the manifest is relative to. Defaults to the directory
+   * holding the config, which is what almost everyone wants.
+   */
+  root?: string;
+  /** The tsconfig the module graph is built from. Defaults to `<root>/tsconfig.json`. */
+  tsconfig?: string;
+  /** Where generated output is written. Defaults to `generated`. */
+  generatedDir?: string;
+  /** The only place a rule is defined. */
+  rules: Rule[];
+};
+
+export function defineArchitecture(config: ArchitectureManifest): ArchitectureManifest {
+  return config;
+}
