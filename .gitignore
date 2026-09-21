@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.archcheck/cache/
+.DS_Store
+*.tsbuildinfo

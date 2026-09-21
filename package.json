@@ -1,0 +1,44 @@
+{
+  "name": "archcheck",
+  "version": "0.2.0",
+  "description": "An AI-first architecture conformance engine. Rules declared once, checked at every moment, returned as typed diagnostics.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "archcheck": "./dist/cli/index.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "typescript": ">=5.4"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.14",
+    "@types/bun": "^1.4.2",
+    "@types/node": "^22.10.2",
+    "lefthook": "^1.10.1",
+    "typescript": "^5.7.2"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "bash scripts/run-checks.sh",
+    "typecheck": "bash scripts/check-typecheck.sh",
+    "lint": "bash scripts/check-lint.sh",
+    "test": "bash scripts/check-tests.sh",
+    "selfhost": "bash scripts/check-selfhost.sh",
+    "emit": "bun run src/cli/index.ts emit",
+    "emit:check": "bash scripts/check-emit.sh",
+    "format": "biome format --write .",
+    "prepare": "lefthook install || true"
+  }
+}

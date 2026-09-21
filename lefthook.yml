@@ -1,0 +1,18 @@
+# The hook runs the same scripts as `bun run check` and as CI. One source of truth.
+pre-commit:
+  parallel: true
+  commands:
+    lint:
+      glob: '*.{ts,js,json}'
+      run: bunx biome check --write --no-errors-on-unmatched {staged_files} && git add {staged_files}
+    generated-files-are-not-hand-edited:
+      glob: 'generated/**'
+      run: |
+        echo "generated/ is emitted from architecture.config.ts — edit the manifest and re-run"
+        echo "  npx archcheck emit"
+        exit 1
+
+pre-push:
+  commands:
+    check:
+      run: bash scripts/run-checks.sh

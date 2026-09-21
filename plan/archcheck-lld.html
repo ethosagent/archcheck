@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>archcheck — Low-Level Design</title>
+<link rel="stylesheet" href="assets/doc.css">
+<style>
+.cnav{position:sticky;top:0;z-index:20;display:flex;gap:2px;overflow-x:auto;background:var(--surface);
+      border-bottom:1px solid var(--line);padding:0 16px}
+.cnav a{flex:none;padding:11px 11px 10px;font:500 13px var(--body);color:var(--muted);
+        text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.cnav a:hover{color:var(--ink)}
+pre.code{background:var(--sunk);border-radius:6px;padding:12px 14px;overflow-x:auto;
+         font:400 12px/1.7 var(--mono);white-space:pre;margin:10px 0}
+pre.code .c{color:var(--faint)} pre.code .k{color:var(--cg)} pre.code .w{color:var(--ev)}
+pre.flow{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px 18px;
+         overflow-x:auto;font:400 12px/1.65 var(--mono);white-space:pre;margin:14px 0;color:var(--ink)}
+.fix{border:1px solid var(--line);border-left:4px solid var(--dn);border-radius:0 8px 8px 0;
+     background:var(--surface);padding:14px 17px;margin-bottom:12px}
+.fix h4{font-size:1rem;margin-bottom:5px}
+.fix .was{font-size:13px;color:var(--muted);margin:0 0 8px}
+.fix .now{font-size:13px;color:var(--ink);margin:0;padding-top:8px;border-top:1px solid var(--line)}
+.fix .now b{color:var(--ok)}
+.fix.minor{border-left-color:var(--warn)}
+.ladder{display:grid;gap:0;border:1px solid var(--line);border-radius:8px;overflow:hidden;
+        background:var(--surface);margin:14px 0}
+.rung{display:grid;grid-template-columns:168px minmax(0,1fr);gap:16px;padding:11px 15px;
+      border-bottom:1px solid var(--line)}
+.rung:last-child{border-bottom:0}
+.rung b{font:600 12.5px var(--mono);color:var(--ink)}
+.rung span{font-size:13px;color:var(--muted)}
+.rung .no{display:block;font-size:12px;color:var(--dn);margin-top:3px}
+.lg{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:10px;margin:16px 0}
+.lc{border:1px solid var(--line);border-radius:9px;background:var(--surface);padding:14px 15px;
+    border-top:3px solid var(--cg)}
+.lc h4{font-size:.96rem;margin-bottom:4px}
+.lc p{margin:0;font-size:12.5px;color:var(--muted);line-height:1.55}
+.what{color:var(--muted);font-size:12.5px;margin:6px 0 0;line-height:1.55}
+.ok{color:var(--ok)}
+table{font-size:13px}
+td.mono,th.mono{font-family:var(--mono);font-size:12px}
+@media (max-width:640px){.rung{grid-template-columns:1fr;gap:3px}}
+</style>
+</head><body>
+
+<nav class="cnav">
+  <a href="architecture-checks.html">← How checks work</a>
+  <a href="#review">Critical review</a>
+  <a href="#types">Types</a>
+  <a href="#seams">Seams</a>
+  <a href="#kinds">Contract types</a>
+  <a href="#probes">Probes</a>
+  <a href="#cli">CLI</a>
+  <a href="#layout">Layout</a>
+  <a href="#order">Build order</a>
+  <a href="#resolved">Decided</a>
+</nav>
+
+<main class="wrap">
+<header class="docHead">
+  <div class="eyebrow">Build spec · read before writing code</div>
+  <h1>archcheck — Low-Level Design</h1>
+  <p class="lede">The design reviewed against its own failure modes, every open question
+  decided, and specified concretely enough to start writing code.</p>
+  <div class="meta">archcheck v0 · 20 September 2026</div>
+</header>
+
+<!-- ═══════════════════════ REVIEW -->
+<h2 class="sec" id="review">1 · Critical review — what was wrong</h2>
+<p class="body">Twelve problems found in the design as written. Nine needed a fix, three are
+accepted limits now stated honestly instead of glossed over.</p>
+
+<div class="fix"><h4>1 · Editor feedback would have lost the remedy</h4>
+  <p class="was"><b>Was:</b> emit a lint config, and the editor shows the underlying linter's own
+  message — a rule name with no statement and no remedy. The best feedback moment, wasted.</p>
+  <p class="now"><b>Now:</b> the emitter writes the <b>statement and remedy summary into the lint
+  message text itself</b>. The editor squiggle already reads "domain may not import services —
+  invert the call". <code>archcheck</code> adds the structured form on top; it is not the only way
+  to get a useful message.</p></div>
+
+<div class="fix"><h4>2 · One rule can need several configs</h4>
+  <p class="was"><b>Was:</b> <code>ContractType.emit(rule) → config</code>. But encapsulation needs
+  <em>both</em> a package exports map and a graph rule. Layers may need a lint rule for the
+  dynamic-import ban alongside the graph rule.</p>
+  <p class="now"><b>Now:</b> <code>emit(rule) → Fragment[]</code>, each fragment targeting one
+  sink. The merger groups fragments by target and writes one file per sink.</p></div>
+
+<div class="fix"><h4>3 · It would have re-run the whole check suite</h4>
+  <p class="was"><b>Was:</b> ambiguous whether archcheck runs the type checker, linter and graph
+  tool — which would duplicate every other gate and double CI time.</p>
+  <p class="now"><b>Now:</b> every probe can either <b>run</b> a tool or <b>ingest</b> its existing
+  report. CI runs each tool once, writes its JSON, and archcheck normalises. Locally, running them
+  directly is the convenience path.</p></div>
+
+<div class="fix"><h4>4 · No baseline — so no rule could ever be added to existing code</h4>
+  <p class="was"><b>Was:</b> a rule is on or off. On an existing codebase, turning a rule on means
+  fixing every violation first, which means nobody turns it on.</p>
+  <p class="now"><b>Now:</b> a <b>ratchet</b>. <code>baseline.json</code> records known violations
+  by <b>stable identity hash, never line number</b>, so moving code does not resurrect a finding.
+  The run fails on new violations only, and <b>also fails if a baselined finding is gone but still
+  listed</b> — so the file shrinks as debt is paid and cannot silently over-suppress.</p></div>
+
+<div class="fix"><h4>5 · No way to grant a genuine exception</h4>
+  <p class="was"><b>Was:</b> "exemptions with an expiry" asserted, never designed. In practice
+  people then use inline comments, which spread and are never reviewed.</p>
+  <p class="now"><b>Now:</b> exceptions live <b>in the manifest only</b> — never inline — each with
+  an owner and an expiry date. An expired exception fails the run. Inline suppression comments are
+  themselves a lint error.</p></div>
+
+<div class="fix"><h4>6 · Rule ids could be renamed, breaking history</h4>
+  <p class="was"><b>Was:</b> "stable ids" claimed, with nothing enforcing it. A rename silently
+  orphans every baseline entry and every historical annotation.</p>
+  <p class="now"><b>Now:</b> ids are <b>immutable once committed</b>. Renaming means a new id plus
+  <code>replaces: 'old-id'</code>, and a check fails if a committed id disappears without one.</p></div>
+
+<div class="fix"><h4>7 · The model probe had no failure path</h4>
+  <p class="was"><b>Was:</b> judgement rules assume a model is reachable. In CI without
+  credentials, in a sandbox, or offline, the run would break.</p>
+  <p class="now"><b>Now:</b> the judgement probe <b>skips cleanly with no credentials</b> and says
+  so in the summary, exactly like a live test. It also carries a concurrency cap and a per-run
+  spend ceiling, and refuses rather than overspending.</p></div>
+
+<div class="fix minor"><h4>8 · "Incremental" was overstated</h4>
+  <p class="was"><b>Was:</b> "only changed files and their dependents are re-checked" — but
+  computing dependents needs the whole graph anyway.</p>
+  <p class="now"><b>Now:</b> stated honestly. The graph is always built; caching saves the
+  <em>parse</em>, and diff-scoping saves <b>rule evaluation and every model call</b>. That is where
+  the real cost is, so the benefit stands — the claim was just wrong about why.</p></div>
+
+<div class="fix minor"><h4>9 · Doc generation would have bloated the manifest</h4>
+  <p class="was"><b>Was:</b> generate the whole patterns document from the manifest, which means
+  every paragraph of prose lives in a config file.</p>
+  <p class="now"><b>Now:</b> the manifest holds only the <b>short</b> statement and remedy, and
+  generates <b>the rule table and the coverage counts</b>. Long-form prose stays hand-written in
+  the patterns document. The generated region is marked, and hand-editing it fails a check.</p></div>
+
+<div class="fix minor"><h4>10 · No standard output format for CI</h4>
+  <p class="was"><b>Was:</b> a bespoke JSON shape, which no CI platform understands.</p>
+  <p class="now"><b>Now:</b> <b>SARIF</b> is the CI format — consumed natively by code scanning and
+  editor viewers, and diffable across runs. Our richer Diagnostic remains the agent format, carried
+  in SARIF's <code>properties</code> bag so nothing is lost.</p></div>
+
+<h3 style="margin:24px 0 10px">Three limits, accepted</h3>
+<div class="lg">
+  <div class="lc" style="border-top-color:var(--warn)"><h4>One config per repository</h4>
+    <p>No per-package manifests. Simpler, and the architecture is repository-wide by definition.
+    Revisit only if a second product shares the repo.</p></div>
+  <div class="lc" style="border-top-color:var(--warn)"><h4>Static only</h4>
+    <p>Nothing observes runtime. A rule about what happens under load is out of scope and always
+    will be.</p></div>
+  <div class="lc" style="border-top-color:var(--warn)"><h4>Model verdicts stay advisory</h4>
+    <p>Promotable per rule, but the default never changes. A non-deterministic blocking gate is how
+    a check suite loses trust.</p></div>
+</div>
+
+<div class="callout accent"><b>Verdict after review.</b> The three-seam shape held — every problem
+above was a detail inside a seam, not a missing seam. That is the signal worth having before
+implementation starts.</div>
+
+<!-- ═══════════════════════ TYPES -->
+<h2 class="sec" id="types">2 · Types</h2>
+<p class="body">Five types. Everything else is a function between them.</p>
+<pre class="code"><span class="c">// ─── what the consumer writes</span>
+type Rule = {
+  id: string;                      <span class="c">// immutable once committed</span>
+  kind: ContractKind;              <span class="c">// closed set — see §4</span>
+  statement: string;               <span class="c">// one sentence, goes into the lint message</span>
+  severity: 'error' | 'warn' | 'advisory' | 'off';
+  confidence: 'deterministic' | 'proxy' | 'model';
+  params: Record&lt;string, unknown&gt;; <span class="c">// kind-specific, validated by the kind</span>
+  remedy: { summary: string; allowed?: string[]; autofix?: boolean; docs?: string };
+  replaces?: string;               <span class="c">// set when an id is superseded</span>
+  owner?: string; expires?: string;<span class="c">// required on an exception</span>
+};
+
+<span class="c">// ─── what a probe returns, before enrichment</span>
+type RawFinding = {
+  ruleId: string;
+  file: string; line?: number; col?: number; endLine?: number;
+  evidence: Record&lt;string, unknown&gt;;  <span class="c">// { from, to } for a graph edge, etc.</span>
+  identity: string;                   <span class="c">// stable hash — survives line moves</span>
+};
+
+<span class="c">// ─── what everything downstream consumes</span>
+type Diagnostic = RawFinding &amp; {
+  schemaVersion: 1;
+  statement: string;
+  severity: Rule['severity'];
+  confidence: Rule['confidence'];
+  remedy: Rule['remedy'];
+  detectedBy: string;
+  baselined: boolean;
+};
+
+<span class="c">// ─── emitted config, grouped by sink</span>
+type Fragment = { target: 'graph' | 'lint' | 'boundaries' | 'test' | 'exports'; content: unknown };
+
+type RunResult = {
+  ok: boolean;
+  diagnostics: Diagnostic[];
+  skipped: { probe: string; reason: string }[];
+  coverage: { total: number; deterministic: number; proxy: number; model: number };
+};</pre>
+<div class="callout"><b>The identity hash is the load-bearing field.</b> Baselining, deduplication
+and "did my fix work" all key off it. Compute it from <code>ruleId</code> plus the semantic
+evidence — the import edge, the symbol name — <b>never the line number</b>.</div>
+
+<!-- ═══════════════════════ SEAMS -->
+<h2 class="sec" id="seams">3 · The three seams</h2>
+<pre class="code">interface ContractType {
+  kind: ContractKind;
+  validate(rule: Rule): Result&lt;void, string[]&gt;;   <span class="c">// params well-formed?</span>
+  emit(rule: Rule, ctx: EmitCtx): Fragment[];      <span class="c">// one rule → many sinks</span>
+  explain(f: RawFinding, rule: Rule): string;      <span class="c">// finding → human sentence</span>
+}
+
+interface Probe {
+  name: string;
+  handles: ContractKind[];
+  <span class="c">// run it, or ingest a report another gate already produced</span>
+  run(ctx: RunCtx): Promise&lt;RawFinding[] | Skip&gt;;
+  ingest?(report: unknown): RawFinding[];
+}
+
+interface Reporter {
+  name: string;
+  report(r: RunResult, ctx: ReportCtx): Promise&lt;string | void&gt;;
+}</pre>
+<div class="ladder">
+  <div class="rung"><b>new kind of rule</b><span>Implement <code>ContractType</code>. Rare — the
+    closed set in §4 covers everything we have.</span></div>
+  <div class="rung"><b>new checker</b><span>Implement <code>Probe</code>. A security scanner, a
+    bundle budget, a schema differ.</span></div>
+  <div class="rung"><b>new audience</b><span>Implement <code>Reporter</code>. Nothing upstream
+    changes.</span></div>
+  <div class="rung"><b>new rule</b><span><b class="ok">Nothing.</b> One entry in the manifest. This
+    is the common case and must stay the common case.</span></div>
+</div>
+
+<!-- ═══════════════════════ KINDS -->
+<h2 class="sec" id="kinds">4 · Contract types — the closed set</h2>
+<div class="scroll"><table>
+<thead><tr><th>Kind</th><th>Params</th><th>Emits to</th><th>Covers</th></tr></thead>
+<tbody>
+<tr><td class="mono">layers</td><td class="mono">name · match · mayImport[]</td><td>graph, lint</td>
+    <td>the dependency law. Default-deny: undeclared is forbidden.</td></tr>
+<tr><td class="mono">forbidden</td><td class="mono">from · to · except[]</td><td>graph</td>
+    <td>one specific edge, when a full layer is overkill.</td></tr>
+<tr><td class="mono">encapsulation</td><td class="mono">module · publicSurface</td><td>graph, exports</td>
+    <td>the barrel, and the deep-import ban.</td></tr>
+<tr><td class="mono">naming</td><td class="mono">appliesTo · pattern | prefixes</td><td>lint</td>
+    <td>hooks, twins, selectors, booleans, filenames.</td></tr>
+<tr><td class="mono">required-file</td><td class="mono">forEach · expect</td><td>test</td>
+    <td>every port has a twin; every primitive has a story.</td></tr>
+<tr><td class="mono">declared-field</td><td class="mono">on · field</td><td>test</td>
+    <td>every endpoint declares a permission and an operation id.</td></tr>
+<tr><td class="mono">banned-syntax</td><td class="mono">appliesTo · selector</td><td>lint</td>
+    <td>no clock in rules, no computed import, no inline suppression.</td></tr>
+<tr><td class="mono">judgement</td><td class="mono">statement · appliesTo · examples · cite</td><td>model</td>
+    <td>the fifteen nothing else can decide.</td></tr>
+</tbody></table></div>
+<div class="callout warn"><b>Adding a ninth kind is a design decision, not a task.</b> Every kind
+costs a validator, an emitter, an explainer and a test fixture. If a new rule can be expressed as
+an instance of an existing kind, it must be.</div>
+
+<!-- ═══════════════════════ PROBES -->
+<h2 class="sec" id="probes">5 · Probes and reporters</h2>
+<div class="scroll"><table>
+<thead><tr><th>Probe</th><th>Handles</th><th>Runs / ingests</th><th>Skips when</th></tr></thead>
+<tbody>
+<tr><td class="mono">graph</td><td>layers, forbidden, encapsulation</td>
+    <td>module-graph tool, JSON report</td><td>never</td></tr>
+<tr><td class="mono">lint</td><td>naming, banned-syntax</td><td>linter, JSON report</td><td>never</td></tr>
+<tr><td class="mono">structure</td><td>required-file, declared-field</td><td>filesystem + AST, in-process</td><td>never</td></tr>
+<tr><td class="mono">types</td><td>—</td><td>type checker diagnostics</td><td>never</td></tr>
+<tr><td class="mono">judgement</td><td>judgement</td><td>model, diff-scoped, cached</td>
+    <td><b>no credentials, offline, or budget spent</b></td></tr>
+</tbody></table></div>
+<div class="scroll" style="margin-top:12px"><table>
+<thead><tr><th>Reporter</th><th>Audience</th><th>Shape</th></tr></thead>
+<tbody>
+<tr><td class="mono">terminal</td><td>a person</td><td>grouped by confidence, deterministic first</td></tr>
+<tr><td class="mono">json</td><td>an agent</td><td><code>RunResult</code>, schema-versioned</td></tr>
+<tr><td class="mono">sarif</td><td>CI and editors</td><td>standard; extras in <code>properties</code></td></tr>
+<tr><td class="mono">verdict</td><td>a blocking hook</td><td><code>{ block, reason, diagnostics }</code></td></tr>
+</tbody></table></div>
+
+<!-- ═══════════════════════ CLI -->
+<h2 class="sec" id="cli">6 · CLI and exit codes</h2>
+<pre class="flow">archcheck                     run everything, terminal output
+archcheck --changed           diff-scoped · the pre-commit path
+archcheck --format sarif      CI
+archcheck --format json       agent
+archcheck --only deterministic   skip the model tier entirely
+
+archcheck emit                regenerate configs + the generated doc region
+archcheck emit --check        fail if committed output is stale
+archcheck explain &lt;ruleId&gt;    statement, rationale, examples, current violations
+archcheck baseline --write    record today's violations
+archcheck baseline --prune    drop entries that no longer reproduce
+archcheck coverage            the three counts, computed</pre>
+<div class="ladder">
+  <div class="rung"><b>0</b><span>clean, or only baselined and advisory findings</span></div>
+  <div class="rung"><b>1</b><span>new violations of error-severity rules</span></div>
+  <div class="rung"><b>2</b><span>configuration invalid — a malformed manifest or a rule whose
+    params fail validation. Distinct from 1 so an agent does not try to "fix the code".</span></div>
+  <div class="rung"><b>3</b><span>emitted output is stale</span></div>
+  <div class="rung"><b>4</b><span>a baselined finding no longer reproduces — prune the
+    baseline</span></div>
+</div>
+
+<!-- ═══════════════════════ LAYOUT -->
+<h2 class="sec" id="layout">7 · What lands in a consumer repo</h2>
+<pre class="flow">architecture.config.ts        <span style="color:var(--faint)">you write · rules only</span>
+.archcheck/
+  baseline.json               <span style="color:var(--faint)">generated · committed · shrinks over time</span>
+  cache/                      <span style="color:var(--faint)">generated · gitignored</span>
+generated/
+  graph.config.cjs            <span style="color:var(--faint)">generated · committed · never hand-edited</span>
+  lint.overrides.json         <span style="color:var(--faint)">generated · committed</span>
+  boundaries.json             <span style="color:var(--faint)">generated · committed</span>
+package.json                  <span style="color:var(--faint)">two script lines</span></pre>
+<p class="body">Every generated file opens with a header naming the rule that produced it and
+saying it is generated. A pre-write hook blocks edits to those paths; <code>emit --check</code>
+catches anything that slipped through.</p>
+
+<!-- ═══════════════════════ ORDER -->
+<h2 class="sec" id="order">8 · Build order</h2>
+<div class="ladder">
+  <div class="rung"><b>v0.1 · walking skeleton</b><span>Types, registry, <code>layers</code> kind,
+    graph probe, terminal + json reporters, <code>emit</code> and the run. One rule end to end,
+    with its fixture violation. <b class="ok">Proves the whole pipe before anything is
+    broad.</b></span></div>
+  <div class="rung"><b>v0.2 · the structural set</b><span><code>encapsulation</code>,
+    <code>banned-syntax</code>, <code>naming</code> · lint probe · the statement-in-the-message
+    trick. Covers the load-bearing rules.</span></div>
+  <div class="rung"><b>v0.3 · adoption</b><span>Baseline ratchet, exceptions with expiry, exit
+    codes, <code>emit --check</code>. Without this it cannot be turned on anywhere that already
+    has code.</span></div>
+  <div class="rung"><b>v0.4 · the rest of the structure</b><span><code>required-file</code>,
+    <code>declared-field</code>, structure probe, SARIF reporter, coverage
+    accounting.</span></div>
+  <div class="rung"><b>v0.5 · judgement</b><span>The model probe, caching, budget cap, clean skip.
+    Advisory only. <b>Last, deliberately</b> — everything before it must work without a model.</span></div>
+</div>
+<div class="callout accent"><b>v0.1 is one rule, not one feature.</b> Pick
+<code>domain-no-service-import</code>, carry it from manifest entry through emitted config,
+violation, normalisation and both reporters, with a fixture that must fail. Everything after that
+is breadth.</div>
+
+<!-- ═══════════════════════ RESOLVED -->
+<h2 class="sec" id="resolved">9 · The three open questions, decided</h2>
+
+<h3 style="margin:22px 0 10px">9.1 · Where it lives — in-tree <em>and</em> published</h3>
+<p class="body">These were never in tension. It lives at <code>packages/archcheck/</code> in the
+main repository and publishes to npm from there. Monorepo publishing is ordinary, and it buys both
+properties at once.</p>
+<div class="ladder">
+  <div class="rung"><b>why in-tree</b><span>Through v0.1–v0.2 the seams will move. Every seam
+    change across a package boundary is a version bump, a release and a bump-back in the consumer —
+    a day of friction per change, at exactly the moment changes are most frequent.</span></div>
+  <div class="rung"><b>why still published</b><span>Nothing about living in the repo stops
+    <code>npm publish</code> from that directory. The package name is reserved from day one, and
+    adopting it elsewhere never requires a migration.</span></div>
+  <div class="rung"><b>when to extract</b><span>Only if a second repository depends on it
+    <em>and</em> the seams have survived roughly ten real rules unchanged. Until both are true,
+    extracting costs more than it returns.</span></div>
+  <div class="rung"><b>the boundary is still real</b><span>archcheck imports nothing from the
+    engine — enforced by archcheck. If it cannot hold its own dependency rule, it has no business
+    holding anyone else's.</span></div>
+</div>
+
+<h3 style="margin:26px 0 10px">9.2 · Fixtures — two suites, different jobs</h3>
+<p class="body">The tension was real: package-owned fixtures cannot use the consumer's layout, and
+consumer-owned fixtures cannot self-test the package. The answer is that these are two different
+questions and each needs its own suite.</p>
+<div class="lg">
+  <div class="lc"><h4>In the package — does the mechanism work?</h4>
+    <p>Tiny synthetic repositories, one per contract kind. Generic, never World-Engine-shaped.
+    Proves that <code>layers</code> emits correctly, detects correctly and normalises correctly.
+    Ships with archcheck and runs on every change to it.</p></div>
+  <div class="lc"><h4>In the consumer — does <em>this rule</em> match?</h4>
+    <p>One deliberate violation per rule instance, in the real layout. Proves that the rule as
+    configured here actually catches something. A rule whose pattern matches nothing passes every
+    build and looks exactly like compliance.</p></div>
+</div>
+<div class="callout accent"><b>And the consumer's obligation is itself a rule.</b> Every rule at
+<code>severity: error</code> must have a fixture that it catches — expressed as a
+<code>required-file</code> instance, checked by archcheck, on itself. The "test the checker" step
+stops being discipline and becomes a gate.</div>
+<pre class="code">{ <span class="k">id</span>: 'every-error-rule-has-a-fixture',
+  <span class="k">kind</span>: 'required-file',
+  <span class="k">params</span>: { forEach: 'rule[severity=error]', expect: 'fixtures/{id}.violation.ts' },
+  <span class="k">severity</span>: 'error',
+  <span class="k">remedy</span>: { summary: 'add a file that deliberately breaks this rule, and assert it is caught' } }</pre>
+
+<h3 style="margin:26px 0 10px">9.3 · The judgement probe — provider, credential, cost</h3>
+<p class="body">The last undecided piece, and the one with the most ways to go wrong. Four
+decisions.</p>
+
+<div class="ladder">
+  <div class="rung"><b>provider is a seam</b><span>An <code>LlmProvider</code> interface with one
+    method, so the probe is never bound to a vendor. Ships with one implementation; a second is a
+    day's work if it is ever needed.</span></div>
+  <div class="rung"><b>credentials from the environment, never config</b><span>Read from the
+    environment at run time. No key, no failure — the probe <b>skips and says so</b>. Locally that
+    is the developer's own key; in CI a repository secret. A key never appears in a file archcheck
+    reads.</span></div>
+  <div class="rung"><b>structured output, not prose</b><span>The judge returns a strict schema —
+    verdict, cited span, confidence — so parsing never guesses. A verdict that fails schema
+    validation is discarded rather than salvaged.</span></div>
+  <div class="rung"><b>budget before the first call</b><span>A per-run ceiling in dollars and
+    calls, checked before each request. Over the ceiling the probe stops and reports how many rules
+    went unjudged. It never silently spends more.</span></div>
+</div>
+
+<h4 style="margin:22px 0 8px">Two decisions that make it affordable</h4>
+<pre class="code"><span class="c">// 1 · rules are the CACHED PREFIX, the file is the volatile suffix</span>
+<span class="c">//    every judgement rule's statement and examples are identical across every file,</span>
+<span class="c">//    so they cache once and are re-read at a fraction of the price.</span>
+
+  [ system: judge instructions          ]  <span class="w">← stable</span>
+  [ all judgement rules + examples      ]  <span class="w">← stable · cache breakpoint here</span>
+  [ the one file under review           ]  ← volatile
+
+<span class="c">// 2 · batch by FILE, not by rule</span>
+<span class="c">//    judging 15 rules against one file is one call, not fifteen.</span>
+<span class="c">//    15 rules x 40 changed files = 40 calls, not 600.</span></pre>
+
+<pre class="code"><span class="c">// config — the whole surface</span>
+judgement: {
+  model:   'claude-opus-5',      <span class="c">// default. 'claude-sonnet-5' is the usual cost trade</span>
+  budget:  { maxUsd: 0.50, maxCalls: 60 },   <span class="c">// per run</span>
+  scope:   'changed',            <span class="c">// 'changed' | 'all' — never 'all' in a hook</span>
+  concurrency: 4,
+}</pre>
+<div class="callout"><b>On model choice.</b> Opus 5 is the default because a judge that produces
+false positives is worse than no judge — people stop reading the advisory stream and the tier dies.
+Sonnet 5 is the obvious cost trade once the rules are calibrated and their hit rate is known, and
+it is one config line. Start accurate, get cheaper with evidence.</div>
+<div class="callout warn"><b>Files under review are quoted data, never instruction.</b> A source
+file containing text that reads like a directive is a string being judged, not a command being
+followed. Stated here because it is the one security property of this probe, and it is easy to lose
+when someone later "simplifies" the prompt assembly.</div>
+
+<h3 style="margin:26px 0 10px">Nothing is open</h3>
+<div class="callout accent"><b>Ready to implement.</b> Every decision this design depends on is
+made. What remains is v0.1: one rule, carried end to end, with a fixture that must fail.</div>
+
+<footer class="docFoot">
+  <div>archcheck · low-level design · reviewed before implementation.</div>
+  <div><a href="architecture-checks.html">How checks work</a> ·
+       <a href="../../world-map/patterns.html">Code patterns</a> · <a href="../../world-map/01-index.html">Index</a></div>
+</footer>
+</main></body></html>
