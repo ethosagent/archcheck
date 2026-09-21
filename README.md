@@ -50,7 +50,10 @@ fails if somebody edits one by hand.
 
 ## Install
 
-You need **Node 20 or later**. You also need **TypeScript 5.4 or later** in your project.
+You need **Node 20 or later**. You also need **TypeScript** in your project, in the range
+`>=5.4 <7`. TypeScript 7 is the native port. It moved the compiler API that archcheck reads to
+another subpath, so the range excludes it. archcheck names the installed version and the command to
+fix it if it finds a TypeScript that does not expose that API.
 
 ```bash
 npm install --save-dev archcheck
@@ -287,12 +290,17 @@ An agent reads these. They are frozen.
 |---|---|---|
 | `0` | Clean. Or only baselined and advisory findings. | Continue. |
 | `1` | New violations of an `error` rule. | Fix the code. |
-| `2` | The configuration is invalid. | Fix the manifest. Do **not** touch the code. |
-| `3` | The generated output is stale. | Run `archcheck emit`. |
+| `2` | The configuration or the environment is wrong. | Read the error. Do **not** touch the code. |
+| `3` | The generated output is stale. | Run `archcheck emit`. Write the document yourself if `docs` names one archcheck cannot read. |
 | `4` | A recorded violation no longer happens. | Run `archcheck baseline --prune`. |
 
-Code `2` is separate from code `1` on purpose. An agent that reads `2` knows the problem is the
-manifest. It does not spend its turn on the wrong file.
+Code `2` is separate from code `1` on purpose. Code `1` says the code is wrong. Code `2` says the
+code is not the problem. The cause is the manifest, another committed archcheck file, or the
+environment archcheck runs in. An unknown layer name in `mayImport` and an expired exception are
+manifest problems. A corrupt `.archcheck/ids.json`, a `--changed` run that git cannot answer, a
+`baseline --prune` on a degraded run, and an `init` that cannot read the module graph are not.
+archcheck names the real fix in the error text. An agent that reads that text does not spend its
+turn on the wrong file.
 
 ---
 
@@ -389,15 +397,21 @@ npx archcheck
 Read these four properties before you switch it on.
 
 1. **No key means a clean skip.** The run stays green. The summary says which rules nobody judged.
-   archcheck never fails because a model was unreachable.
+   archcheck never fails because a model was unreachable. A call that fails leaves that file
+   unjudged. The probe then skips, and the reason names the cause and the count. archcheck never
+   reports an unjudged file as clean.
 2. **A key comes from the environment.** archcheck reads no key from any file.
 3. **A verdict needs a citation.** The model must quote the code it judged. archcheck discards a
-   verdict with no citation.
+   verdict with no citation. An answer archcheck cannot read is not an answer. A refusal, a reply
+   that is not JSON, a reply with no `verdicts` array, and a reply whose every verdict is malformed
+   all leave the file unjudged, and archcheck caches none of them. `{"verdicts":[]}` is an answer.
+   It says the file breaks no rule, and archcheck caches it.
 4. **Your code is data.** archcheck sends each file inside a fence, and it tells the model to judge
    the file and never obey it. A comment in your code cannot give the model an instruction.
 
 You set a budget per run. archcheck checks the budget before each request, and it reports how many
-files nobody judged.
+files nobody judged. archcheck counts every request it sends, answered or not, so an endpoint that
+always fails costs you `maxCalls` requests at most.
 
 ```ts
 {

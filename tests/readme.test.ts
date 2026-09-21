@@ -10,6 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { EXIT } from '../src/archcheck.js';
 
 const ROOT = join(import.meta.dir, '..');
 const CLI = join(ROOT, 'src', 'cli', 'index.ts');
@@ -31,6 +32,24 @@ function archcheck(args: string[], cwd: string) {
     return { code: e.status ?? 1, stdout: e.stdout ?? '', stderr: e.stderr ?? '' };
   }
 }
+
+/**
+ * The body of one README section: from its heading to the next heading or horizontal rule.
+ *
+ * A claim is asserted against its own section, never against the whole document — the README says
+ * `archcheck emit` in several places, and a test that cannot tell them apart passes on the wrong
+ * one.
+ */
+function section(heading: string): string {
+  const start = README.indexOf(heading);
+  if (start === -1) return '';
+  const body = README.slice(start + heading.length);
+  const end = body.search(/\n---\n|\n## /);
+  return end === -1 ? body : body.slice(0, end);
+}
+
+/** README prose wraps, so a sentence assertion must not depend on where the wrap fell. */
+const unwrapped = (text: string) => text.replace(/\s+/g, ' ');
 
 function inExampleCopy<T>(body: (root: string) => T): T {
   const work = mkdtempSync(join(tmpdir(), 'archcheck-readme-'));
@@ -55,6 +74,30 @@ describe('the files the README points at exist', () => {
       expect(existsSync(join(ROOT, path))).toBe(true);
     });
   }
+});
+
+describe('the Install section matches the package the reader installs', () => {
+  const peerRange = (
+    JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as {
+      peerDependencies: Record<string, string>;
+    }
+  ).peerDependencies.typescript;
+  const install = section('## Install');
+
+  test('it quotes the TypeScript range package.json declares', () => {
+    // Read from package.json, never written twice: the README said "TypeScript 5.4 or later" while
+    // the peer range said `>=5.4 <7`, so a reader who followed the README got ERESOLVE from
+    // `npm install archcheck typescript@7`.
+    expect(peerRange).toBeTypeOf('string');
+    expect(unwrapped(install)).toContain(`\`${peerRange}\``);
+  });
+
+  test('it says why TypeScript 7 is excluded', () => {
+    // The run-time half of the same exclusion is `missingCompilerApi` in src/util/compilerApi.ts,
+    // pinned by src/util/compilerApi.test.ts.
+    expect(unwrapped(install)).toContain('TypeScript 7');
+    expect(unwrapped(install)).not.toContain('TypeScript 5.4 or later');
+  });
 });
 
 describe('every command the README lists is a real command', () => {
@@ -119,6 +162,68 @@ describe('the outputs the README quotes', () => {
     const { stdout } = archcheck(['--help'], EXAMPLE);
     for (const code of ['0', '1', '2', '3', '4']) expect(stdout).toContain(`  ${code}  `);
     for (const code of ['`0`', '`1`', '`2`', '`3`', '`4`']) expect(README).toContain(code);
+  });
+});
+
+describe('the exit codes the README tabulates', () => {
+  const exitCodes = section('### Exit codes');
+  const row = (code: number) =>
+    new RegExp(`^\\| \`${code}\` \\|.*$`, 'm').exec(exitCodes)?.[0] ?? '';
+
+  test('the table lists every code the CLI can return, and no other', () => {
+    const tabulated = [...exitCodes.matchAll(/^\| `(\d)` \|/gm)].map((match) => Number(match[1]));
+    expect(tabulated.sort((a, b) => a - b)).toEqual(
+      [...new Set<number>(Object.values(EXIT))].sort((a, b) => a - b),
+    );
+  });
+
+  test('exit 2 comes from the environment too, so the row does not blame the manifest', () => {
+    // Most routes to 2 are not manifest problems. `--changed` outside a git work tree is the
+    // cheapest one to run: `gitChangedFiles` (src/cli/args.ts) refuses rather than reporting an
+    // empty changed set, and it names the fix.
+    const outside = mkdtempSync(join(tmpdir(), 'archcheck-readme-nogit-'));
+    try {
+      cpSync(EXAMPLE, outside, { recursive: true });
+      const { code, stderr } = archcheck(['--changed'], outside);
+      expect(code).toBe(2);
+      expect(stderr).toContain('the environment is wrong, not the code');
+      expect(stderr).toContain('→');
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+
+    expect(row(2)).toContain('environment');
+    expect(row(2)).not.toContain('Fix the manifest.');
+  });
+
+  test('the exit 2 paragraph keeps the contrast with exit 1, and stays true', () => {
+    expect(unwrapped(exitCodes)).toContain('does not spend its turn on the wrong file');
+    expect(unwrapped(exitCodes)).toContain('git cannot answer');
+    expect(unwrapped(exitCodes)).not.toContain('knows the problem is the manifest');
+  });
+
+  test('exit 3 on a document nobody wrote is not fixed by emit, and the row says so', () => {
+    inExampleCopy((root) => {
+      const manifest = join(root, 'architecture.config.ts');
+      writeFileSync(
+        manifest,
+        readFileSync(manifest, 'utf8').replace(
+          'defineArchitecture({',
+          "defineArchitecture({\n  docs: ['NOT-WRITTEN.md'],",
+        ),
+      );
+      expect(archcheck(['emit'], root).code).toBe(0);
+
+      // Re-emitting cannot create a document nobody wrote, so `runEmit` (src/cli/index.ts)
+      // suppresses the emit hint and prints the fix that works.
+      const { code, stderr } = archcheck(['emit', '--check'], root);
+      expect(code).toBe(3);
+      expect(stderr).toContain('create it with an archcheck fence, or drop it from the manifest');
+      expect(stderr).not.toContain('npx archcheck emit');
+    });
+
+    expect(row(3)).toContain('docs');
+    expect(row(3)).toContain('cannot read');
   });
 });
 
@@ -258,11 +363,41 @@ describe('the README’s quick start', () => {
 });
 
 describe('the judgement tier claims', () => {
+  const tier = section('## The judgement tier (optional)');
+  const COUNT_WORD: Record<string, number> = { three: 3, four: 4, five: 5, six: 6 };
+
   test('with no key, the run stays green and says which rules nobody judged', () => {
     const judgement = join(ROOT, 'fixtures', 'repos', 'judgement');
     const { code, stdout } = archcheck([], judgement);
     expect(code).toBe(0);
     expect(stdout).toContain('judgement did not run');
     expect(stdout).toContain('no ANTHROPIC_API_KEY');
+  });
+
+  test('the property count it states is the number of properties it lists', () => {
+    // A count in prose drifts the moment somebody adds a property, and this one already had.
+    const stated = /Read these ([a-z]+) properties/.exec(tier)?.[1] ?? '';
+    const listed = [...tier.matchAll(/^\d+\. \*\*/gm)].length;
+    expect(listed).toBeGreaterThan(0);
+    expect(COUNT_WORD[stated]).toBe(listed);
+  });
+
+  test('it says a failed call leaves the file unjudged, never clean', () => {
+    // `createModelProbe` (src/probes/model/index.ts) counts a failing call as unjudged and returns
+    // a Skip naming the cause and the count.
+    expect(unwrapped(tier)).toContain('unjudged');
+  });
+
+  test('it says which answers do not count as an answer, and which one does', () => {
+    // `readJudgeAnswer` (src/probes/model/anthropic.ts) makes a refusal, a non-JSON reply, a reply
+    // with no `verdicts` array and an all-malformed reply non-answers, and keeps them out of the
+    // cache. An empty verdict list is an answer, and it is cached.
+    expect(unwrapped(tier)).toContain('no `verdicts` array');
+    expect(unwrapped(tier)).toContain('`{"verdicts":[]}` is an answer');
+  });
+
+  test('it says the call budget bounds a failing endpoint', () => {
+    // `budget.record` runs for every issued call, answered or not (src/probes/model/index.ts).
+    expect(unwrapped(tier)).toContain('`maxCalls` requests at most');
   });
 });
