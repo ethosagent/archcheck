@@ -12,6 +12,7 @@ GATES=(
   check-tests.sh
   check-emit.sh
   check-selfhost.sh
+  check-publishable.sh
 )
 
 FAILED=()

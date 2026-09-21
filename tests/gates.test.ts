@@ -4,11 +4,15 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = join(import.meta.dir, '..');
 const PLANTED = join(ROOT, 'src', '__planted-bun-api.ts');
+const MANIFEST = join(ROOT, 'package.json');
+// check-publishable.sh builds dist/ and packs it, so it is the slowest gate here. bun's default
+// and check-tests.sh's --timeout are both about ordinary tests, not a tsc build plus an npm pack.
+const PACK_TIMEOUT_MS = 120_000;
 
 function runGate(script: string): { code: number; out: string } {
   try {
@@ -68,4 +72,40 @@ describe('check-typecheck.sh', () => {
     expect(code).toBe(0);
     expect(out).toContain('strict');
   });
+});
+
+describe('check-publishable.sh', () => {
+  test(
+    'is green on the committed tree',
+    () => {
+      const { code, out } = runGate('check-publishable.sh');
+      expect(code).toBe(0);
+      expect(out).toContain('every declared entry point is packed');
+      expect(out).toContain('dist/cli/index.js');
+    },
+    PACK_TIMEOUT_MS,
+  );
+
+  // The planted violation is a declared entry point nothing builds — the exact shape of the bug
+  // this gate exists for, and the one a hardcoded path list would miss. The gate builds dist/
+  // itself, so deleting dist/ would only prove the build works.
+  test(
+    'fails naming an entry point the tarball does not contain',
+    () => {
+      const original = readFileSync(MANIFEST, 'utf8');
+      try {
+        const manifest = JSON.parse(original);
+        manifest.types = './dist/__planted-missing.d.ts';
+        writeFileSync(MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`);
+        const { code, out } = runGate('check-publishable.sh');
+        expect(code).not.toBe(0);
+        expect(out).toContain('missing declared entry point');
+        expect(out).toContain('dist/__planted-missing.d.ts');
+      } finally {
+        // In a finally, not an afterEach: a failed assertion must not leave the manifest planted.
+        writeFileSync(MANIFEST, original);
+      }
+    },
+    PACK_TIMEOUT_MS,
+  );
 });

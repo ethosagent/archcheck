@@ -42,7 +42,8 @@
     "emit": "bun run src/cli/index.ts emit",
     "emit:check": "bash scripts/check-emit.sh",
     "format": "biome format --write .",
-    "prepare": "lefthook install || true"
+    "prepare": "lefthook install || true",
+    "prepublishOnly": "bun run build && bun run check"
   },
   "peerDependenciesMeta": {
     "@anthropic-ai/sdk": {

@@ -34,3 +34,5 @@ jobs:
         run: bash scripts/check-emit.sh
       - name: selfhost
         run: bash scripts/check-selfhost.sh
+      - name: the tarball is publishable
+        run: bash scripts/check-publishable.sh
