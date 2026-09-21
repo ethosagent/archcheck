@@ -6,7 +6,15 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,9 +22,13 @@ const ROOT = join(import.meta.dir, '..');
 const CLI = join(ROOT, 'src', 'cli', 'index.ts');
 const fixture = (name: string) => join(ROOT, 'fixtures', 'repos', name);
 
-function archcheck(args: string[], cwd = ROOT): { code: number; stdout: string; stderr: string } {
+function archcheck(
+  args: string[],
+  cwd = ROOT,
+  entry = CLI,
+): { code: number; stdout: string; stderr: string } {
   try {
-    const stdout = execFileSync('bun', ['run', CLI, ...args], {
+    const stdout = execFileSync('bun', ['run', entry, ...args], {
       cwd,
       encoding: 'utf8',
       env: { ...process.env, NO_COLOR: '1' },
@@ -381,5 +393,59 @@ describe('the barrel ban, end to end', () => {
       expect(map.rules[0].exports).toEqual({ '.': './index.js' });
       expect(map.$generated.doNotEdit).toBe(true);
     });
+  });
+});
+
+describe('the published CLI runs when invoked under any name', () => {
+  /**
+   * The regression test for a silent exit-0. The entry point used to guard on `process.argv[1]`
+   * ending in `cli/index.js`, which is false once npm installs the package — argv[1] is then the
+   * `node_modules/.bin/archcheck` symlink. The CLI did nothing and exited 0, so a consumer read
+   * "clean" from a check that never ran.
+   *
+   * It has to be NODE against the BUILT dist through a symlink, which is what npm sets up. Running
+   * the source through Bun does not reproduce it: Bun resolves a symlink to its realpath, so
+   * argv[1] ends in `cli/index.ts` after all and the guard passes. That near-miss is the reason
+   * this test is spelled out rather than simplified.
+   */
+  const DIST_CLI = join(ROOT, 'dist', 'cli', 'index.js');
+
+  function node(entry: string, args: string[], cwd: string) {
+    try {
+      const stdout = execFileSync('node', [entry, ...args], {
+        cwd,
+        encoding: 'utf8',
+        env: { ...process.env, NO_COLOR: '1' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      return { code: 0, stdout };
+    } catch (error) {
+      const e = error as { status?: number; stdout?: string };
+      return { code: e.status ?? 1, stdout: e.stdout ?? '' };
+    }
+  }
+
+  test('node runs it through a differently-named symlink, and still reports', () => {
+    if (!existsSync(DIST_CLI)) {
+      execFileSync('bun', ['run', 'build'], { cwd: ROOT, stdio: 'ignore' });
+    }
+    const work = mkdtempSync(join(tmpdir(), 'archcheck-bin-'));
+    try {
+      // The shape npm creates: node_modules/.bin/archcheck -> ../archcheck/dist/cli/index.js
+      const link = join(work, 'archcheck');
+      symlinkSync(DIST_CLI, link);
+
+      const clean = node(link, [], fixture('clean'));
+      expect(clean.stdout).toContain('nothing to fix');
+      expect(clean.code).toBe(0);
+
+      // And it must still FAIL through that path: a silent exit 0 is indistinguishable from clean,
+      // which is precisely how the original bug hid.
+      const dirty = node(link, [], fixture('layered'));
+      expect(dirty.stdout).toContain('domain may not import service');
+      expect(dirty.code).toBe(1);
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
   });
 });

@@ -118,15 +118,14 @@ export async function main(argv: readonly string[]): Promise<ExitCode> {
   }
 }
 
-const invokedDirectly =
-  process.argv[1] !== undefined &&
-  (process.argv[1].endsWith('cli/index.ts') || process.argv[1].endsWith('cli/index.js'));
-
-if (invokedDirectly) {
-  main(process.argv.slice(2))
-    .then((code) => process.exit(code))
-    .catch((error: unknown) => {
-      console.error(error instanceof Error ? error.message : String(error));
-      process.exit(EXIT.config);
-    });
-}
+// This module IS the bin, and nothing imports it, so it runs unconditionally. It previously
+// guarded on `process.argv[1]` ending in `cli/index.js` — which is false when npm installs the
+// package, because argv[1] is then the `node_modules/.bin/archcheck` symlink. The CLI silently
+// did nothing and exited 0, so a consumer read "clean" from a check that never ran. A guard that
+// can be wrong about whether to run at all has no place in an entry point.
+main(process.argv.slice(2))
+  .then((code) => process.exit(code))
+  .catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(EXIT.config);
+  });
