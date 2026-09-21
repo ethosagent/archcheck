@@ -9,6 +9,7 @@
     "exceptions-are-a-leaf",
     "filenames-are-camel-case-or-kebab",
     "graph-reports-facts-only",
+    "init-infers-and-writes-nothing-else",
     "kernel-imports-nothing",
     "no-computed-dynamic-import",
     "no-console-outside-an-entry-point",

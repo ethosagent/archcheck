@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "coverage": {
-    "total": 23,
-    "deterministic": 22,
+    "total": 24,
+    "deterministic": 23,
     "proxy": 1,
     "model": 0,
     "automatable": 100
@@ -79,6 +79,15 @@
       "confidence": "deterministic",
       "mark": "✓",
       "remedy": "move the judgement into a contract kind; the graph only observes"
+    },
+    {
+      "id": "init-infers-and-writes-nothing-else",
+      "kind": "layers",
+      "statement": "init reads the folder structure and the graph, and runs no rule",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "infer it from what the code already does; do not evaluate a rule here"
     },
     {
       "id": "kernel-imports-nothing",

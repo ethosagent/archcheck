@@ -14,7 +14,7 @@ and the percentage goes down, in the same commit.
 
 <!-- archcheck:begin rules-table -->
 
-**23 rules** · ✓ 22 deterministic · ◑ 1 proxy · ○ 0 judgement · **100% automatable**
+**24 rules** · ✓ 23 deterministic · ◑ 1 proxy · ○ 0 judgement · **100% automatable**
 
 | | Rule | Statement | Kind | Severity |
 |---|---|---|---|---|
@@ -26,6 +26,7 @@ and the percentage goes down, in the same commit.
 | ✓ | `exceptions-are-a-leaf` | exceptions decide suppression from paths and dates, and run no check | layers | error |
 | ✓ | `filenames-are-camel-case-or-kebab` | a filename is camelCase, or kebab-case when it names a contract kind | naming | error |
 | ✓ | `graph-reports-facts-only` | the graph reader reports facts and evaluates no rule | layers | error |
+| ✓ | `init-infers-and-writes-nothing-else` | init reads the folder structure and the graph, and runs no rule | layers | error |
 | ✓ | `kernel-imports-nothing` | the kernel imports nothing internal — not a layer, and not the TypeScript SDK | layers | error |
 | ✓ | `no-computed-dynamic-import` | a dynamic import names its module literally, so the graph stays complete | banned-syntax | error |
 | ✓ | `no-console-outside-an-entry-point` | logging goes through one seam, so the server stays embeddable | banned-syntax | error |

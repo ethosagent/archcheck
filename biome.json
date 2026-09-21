@@ -42,6 +42,10 @@
       "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
     },
     {
+      "includes": ["examples/**/entry/**"],
+      "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
+    },
+    {
       "includes": ["**/*.test.ts", "tests/**"],
       "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
     }
