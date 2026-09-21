@@ -82,26 +82,56 @@ exit codes
   4  a baselined finding no longer reproduces    → run archcheck baseline --prune
 `;
 
-/** Ask git for the changed set. Local only — archcheck makes no network call it was not told to. */
-export function gitChangedFiles(cwd: string): readonly string[] {
-  const run = (args: string[]): string[] => {
+/**
+ * Ask git for the changed set. Local only — archcheck makes no network call it was not told to.
+ *
+ * A git that cannot answer is a CONFIG failure (exit 2), never an empty changed set. git missing
+ * from PATH, an unborn or detached HEAD, or a directory outside any work tree used to be swallowed
+ * by a bare catch returning `[]`: every probe then filtered to nothing and the run reported clean,
+ * so a pre-commit hook passed every commit forever. Exit 2 because the manifest and the code are
+ * both fine — the environment is not, which is the same call `init` makes when it cannot read the
+ * module graph. `tests/cli.test.ts` → '--changed > git failing is a config error (2)' pins it.
+ */
+export function gitChangedFiles(cwd: string): Result<readonly string[]> {
+  const files = new Set<string>();
+  for (const args of [
+    ['diff', '--name-only', '--diff-filter=ACMR', 'HEAD'],
+    ['diff', '--name-only', '--diff-filter=ACMR', '--cached'],
+    ['ls-files', '--others', '--exclude-standard'],
+  ]) {
+    let output: string;
     try {
-      return execFileSync('git', args, {
+      output = execFileSync('git', args, {
         cwd,
         encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      })
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
-    } catch {
-      return [];
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      const said = (error as { stderr?: string }).stderr;
+      const detail = said === undefined || said.trim() === '' ? describeError(error) : said.trim();
+      return err([
+        `--changed asked git for the changed set, and \`git ${args.join(' ')}\` failed:`,
+        // git answers a misuse with its whole usage screen. The first two lines carry the reason;
+        // the rest would bury the two suggestions below.
+        ...detail
+          .split('\n')
+          .filter((line) => line.trim() !== '')
+          .slice(0, 2)
+          .map((line) => `  ${line.trim()}`),
+        '  → the environment is wrong, not the code: an empty changed set would check nothing',
+        '  → name the files yourself (--changed a.ts,b.ts), or drop --changed to check everything',
+      ]);
     }
-  };
-  const tracked = run(['diff', '--name-only', '--diff-filter=ACMR', 'HEAD']);
-  const staged = run(['diff', '--name-only', '--diff-filter=ACMR', '--cached']);
-  const untracked = run(['ls-files', '--others', '--exclude-standard']);
-  return [...new Set([...tracked, ...staged, ...untracked])].sort();
+    for (const line of output.split('\n')) {
+      const file = line.trim();
+      if (file.length > 0) files.add(file);
+    }
+  }
+  return ok([...files].sort());
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function parseArgs(argv: readonly string[]): Result<ParsedArgs> {
