@@ -10,6 +10,15 @@
  * once, so every probe shares a single parse.
  */
 import { join } from 'node:path';
+import {
+  type Baseline,
+  identitiesOf,
+  nextBaseline,
+  prunedBaseline,
+  readBaseline,
+  staleEntries,
+  writeBaseline,
+} from './baseline/index.js';
 import { contractFor, validateParamsByKind } from './contracts/registry.js';
 import type { ExplainCtx } from './contracts/types.js';
 import {
@@ -20,6 +29,7 @@ import {
   planEmit,
 } from './emit/index.js';
 import type { StaleFile } from './emit/write.js';
+import { applyExceptions, todayIso } from './exceptions/index.js';
 import { readGraph } from './graph/index.js';
 import type { ModuleGraph } from './graph/types.js';
 import { type NormalizeInput, normalize } from './normalize/index.js';
@@ -52,8 +62,13 @@ export type CheckOptions = {
   changed?: readonly string[];
   /** Run only rules at or above this confidence tier. `deterministic` skips the model tier. */
   only?: Confidence;
-  /** Identities the baseline already records (plan 14 supplies these). */
+  /**
+   * Identities the baseline records. Omitted means "read `.archcheck/baseline.json`", which is
+   * what every real caller wants; pass an explicit set only to test without a file.
+   */
   baselined?: ReadonlySet<string>;
+  /** Override today's date. Only the expiry-boundary tests have a reason to. */
+  today?: string;
   /** Ingest `.archcheck/graph.json` instead of reading the graph ourselves. */
   ingestGraph?: boolean;
   /**
@@ -67,9 +82,13 @@ export type CheckOptions = {
 
 export type EmitResult = { written: { path: string; changed: boolean }[]; ledgerPath: string };
 
+export type BaselineOutcome = { path: string; entries: number; removed: number };
+
 export type ArchCheck = {
   readonly registry: Registry;
   check(options?: CheckOptions): Promise<Result<RunResult>>;
+  /** `baseline --write` / `baseline --prune`. Both go through a real run first. */
+  baseline(mode: 'write' | 'prune'): Promise<Result<BaselineOutcome>>;
   emit(): Result<EmitResult>;
   emitCheck(): Result<StaleFile[]>;
   /** Statement, rationale, allowed alternatives and CURRENT violations. */
@@ -193,19 +212,54 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
         }
       }
 
+      const baseline: Baseline = readBaseline(registry.root);
       const normalized = normalize(inputs, {
         byId: (id) => registry.byId(id),
-        ...(checkOptions.baselined === undefined ? {} : { baselined: checkOptions.baselined }),
+        baselined: checkOptions.baselined ?? identitiesOf(baseline),
         refine: (finding, rule) => contractFor(rule.kind)?.refine?.(finding, rule, explainCtx),
       });
       if (!normalized.ok) return err(normalized.error);
 
-      const diagnostics = normalized.value;
+      const today = checkOptions.today ?? todayIso();
+      const applied = applyExceptions(registry.exceptions(), normalized.value, today);
+      const diagnostics = applied.diagnostics;
+
+      // The ratchet's second half. Scoped runs cannot judge it: a diff-scoped run evaluates a
+      // fraction of the repo, so "did not reproduce" would mean "was not looked at".
+      const baselineStale =
+        checkOptions.changed === undefined && checkOptions.baselined === undefined
+          ? staleEntries(baseline, diagnostics)
+          : [];
+
       return ok({
-        ok: !diagnostics.some((d) => d.severity === 'error' && !d.baselined),
+        ok:
+          !diagnostics.some((d) => d.severity === 'error' && !d.baselined && !d.exempted) &&
+          baselineStale.length === 0 &&
+          applied.expired.length === 0,
         diagnostics,
         skipped,
         coverage: registry.coverage(),
+        baselineStale,
+        exceptions: applied.statuses,
+      });
+    },
+
+    async baseline(mode: 'write' | 'prune'): Promise<Result<BaselineOutcome>> {
+      // A baseline is written from an UNBASELINED run: passing an empty set makes every current
+      // violation visible, which is exactly what there is to record.
+      const run = await this.check({ baselined: new Set<string>() });
+      if (!run.ok) return err(run.error);
+
+      const previous = readBaseline(registry.root);
+      const next =
+        mode === 'write'
+          ? nextBaseline(previous, run.value.diagnostics, todayIso())
+          : prunedBaseline(previous, run.value.diagnostics);
+      const path = writeBaseline(registry.root, next);
+      return ok({
+        path,
+        entries: next.entries.length,
+        removed: previous.entries.length - next.entries.length,
       });
     },
 
@@ -281,8 +335,16 @@ export function describeViolations(ruleId: string, diagnostics: readonly Diagnos
   return lines.join('\n');
 }
 
+/**
+ * The order matters. An expired exception is a MANIFEST problem (exit 2) and is checked first,
+ * because the violations it stopped covering are a consequence of it rather than news of their own.
+ * A stale baseline (exit 4) outranks live violations for the same reason: the fix is
+ * `baseline --prune`, and reporting exit 1 would send an agent to edit code that is already right.
+ */
 export function exitCodeFor(result: RunResult): ExitCode {
-  return result.diagnostics.some((d) => d.severity === 'error' && !d.baselined)
+  if (result.exceptions.some((exception) => exception.expired)) return EXIT.config;
+  if (result.baselineStale.length > 0) return EXIT.baselineStale;
+  return result.diagnostics.some((d) => d.severity === 'error' && !d.baselined && !d.exempted)
     ? EXIT.violations
     : EXIT.clean;
 }

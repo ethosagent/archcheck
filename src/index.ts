@@ -7,6 +7,7 @@
  */
 export {
   type ArchCheck,
+  type BaselineOutcome,
   type CheckOptions,
   describeViolations,
   type EmitResult,
@@ -17,6 +18,12 @@ export {
   load,
 } from './archcheck.js';
 export {
+  BASELINE_PATH,
+  type Baseline,
+  identitiesOf,
+  readBaseline,
+} from './baseline/index.js';
+export {
   type ContractType,
   type EmitCtx,
   type ExplainCtx,
@@ -24,6 +31,12 @@ export {
   type Refinement,
   type ValidateCtx,
 } from './contracts/index.js';
+export {
+  type ArchitectureException,
+  applyExceptions,
+  todayIso,
+  validateExceptions,
+} from './exceptions/index.js';
 export { type ArchitectureManifest, defineArchitecture } from './registry/define.js';
 export type { Registry } from './registry/index.js';
 export {
@@ -38,11 +51,13 @@ export {
 } from './report/index.js';
 export { allOk, err, ok, type Result } from './result.js';
 export {
+  type BaselineEntry,
   CONTRACT_KINDS,
   type Confidence,
   type ContractKind,
   type Coverage,
   type Diagnostic,
+  type ExceptionStatus,
   type Fragment,
   type FragmentTarget,
   type RawFinding,

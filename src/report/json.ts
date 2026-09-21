@@ -22,6 +22,10 @@ export function toJsonReport(result: RunResult, ctx: ReportCtx): JsonReport {
     diagnostics: visible(result, ctx),
     skipped: result.skipped,
     coverage: result.coverage,
+    // Both are present even when empty. An agent distinguishing "clean" from "the baseline needs
+    // pruning" from "an exception expired" needs all three states, and a missing key gives it one.
+    baselineStale: result.baselineStale,
+    exceptions: result.exceptions,
   };
 }
 

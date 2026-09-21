@@ -73,6 +73,23 @@ async function runEmit(args: ParsedArgs, cwd: string): Promise<ExitCode> {
   return EXIT.clean;
 }
 
+async function runBaseline(args: ParsedArgs, cwd: string): Promise<ExitCode> {
+  const loaded = load({ cwd });
+  if (!loaded.ok) return fail(loaded.error, EXIT.config);
+  const outcome = await loaded.value.baseline(args.baselineMode ?? 'write');
+  if (!outcome.ok) return fail(outcome.error, EXIT.config);
+  const { path, entries, removed } = outcome.value;
+  console.log(
+    args.baselineMode === 'prune'
+      ? `pruned ${removed} entr${removed === 1 ? 'y' : 'ies'} — ${entries} remaining in ${path}`
+      : `recorded ${entries} entr${entries === 1 ? 'y' : 'ies'} in ${path}`,
+  );
+  if (args.baselineMode === 'write' && entries > 0) {
+    console.log('  these are debt, not policy: no owner and no expiry, so they stay visible');
+  }
+  return EXIT.clean;
+}
+
 async function runExplain(args: ParsedArgs, cwd: string): Promise<ExitCode> {
   const loaded = load({ cwd });
   if (!loaded.ok) return fail(loaded.error, EXIT.config);
@@ -113,6 +130,8 @@ export async function main(argv: readonly string[]): Promise<ExitCode> {
       return runExplain(args, cwd);
     case 'coverage':
       return runCoverage(cwd);
+    case 'baseline':
+      return runBaseline(args, cwd);
     case 'check':
       return runCheck(args, cwd);
   }

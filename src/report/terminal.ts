@@ -71,9 +71,44 @@ export function createTerminalReporter(): Reporter {
         }
       }
 
-      const hidden = result.diagnostics.filter((d) => d.baselined).length;
-      if (hidden > 0 && ctx.showBaselined !== true) {
-        out.push(dim(`  ${hidden} baselined, not shown          --show-baselined to include`));
+      const baselined = result.diagnostics.filter((d) => d.baselined && !d.exempted).length;
+      const exempted = result.diagnostics.filter((d) => d.exempted).length;
+      if ((baselined > 0 || exempted > 0) && ctx.showBaselined !== true) {
+        const parts = [
+          baselined > 0 ? `${baselined} baselined` : '',
+          exempted > 0 ? `${exempted} exempted` : '',
+        ].filter(Boolean);
+        out.push(dim(`  ${parts.join(', ')}, not shown          --show-baselined to include`));
+      }
+
+      // Always, including the exceptions suppressing nothing: a silent exception decays into a
+      // permanent one (plan 15).
+      if (result.exceptions.length > 0) {
+        const expiringSoon = result.exceptions.filter((e) => !e.expired && e.daysLeft <= 30).length;
+        const active = result.exceptions.filter((e) => !e.expired).length;
+        out.push(
+          dim(
+            `  ${active} exception(s) active${expiringSoon > 0 ? `, ${expiringSoon} expiring within 30 days` : ''}`,
+          ),
+        );
+        for (const expired of result.exceptions.filter((e) => e.expired)) {
+          out.push(
+            red(
+              `  ✗ exception expired ${expired.expires} for ${expired.ruleId} — owner ${expired.owner}`,
+            ),
+          );
+        }
+      }
+
+      // Exit 4's explanation, in the place a person is already reading.
+      if (result.baselineStale.length > 0) {
+        out.push(
+          red(`  ✗ ${result.baselineStale.length} baselined finding(s) no longer reproduce`),
+        );
+        for (const entry of result.baselineStale.slice(0, 5)) {
+          out.push(dim(`      ${entry.ruleId}  ${entry.identity}  recorded ${entry.addedAt}`));
+        }
+        out.push(dim('    → run: npx archcheck baseline --prune'));
       }
 
       for (const skip of result.skipped) {
@@ -87,7 +122,12 @@ export function createTerminalReporter(): Reporter {
         ),
       );
 
-      if (shown.length === 0 && result.skipped.length === 0) {
+      if (
+        shown.length === 0 &&
+        result.skipped.length === 0 &&
+        result.baselineStale.length === 0 &&
+        !result.exceptions.some((e) => e.expired)
+      ) {
         out.push('');
         out.push('  nothing to fix');
       }

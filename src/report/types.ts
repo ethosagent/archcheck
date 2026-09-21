@@ -23,8 +23,13 @@ export type Reporter = {
 /** Deterministic failures first, then proxies, then advisories — ordered by authority. */
 export const CONFIDENCE_ORDER = ['deterministic', 'proxy', 'model'] as const;
 
+/**
+ * What a reader should see. Baselined and exempted findings are suppressed by their own mechanisms
+ * and counted rather than printed — but they are counted, and the count is always shown, because a
+ * suppression nobody can see is one nobody reviews.
+ */
 export function visible(result: RunResult, ctx: ReportCtx): Diagnostic[] {
   return result.diagnostics.filter(
-    (d) => d.severity !== 'off' && (ctx.showBaselined === true || !d.baselined),
+    (d) => d.severity !== 'off' && (ctx.showBaselined === true || (!d.baselined && !d.exempted)),
   );
 }

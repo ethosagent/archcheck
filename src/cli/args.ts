@@ -10,7 +10,7 @@ import type { ReporterName } from '../report/index.js';
 import { err, ok, type Result } from '../result.js';
 import type { Confidence } from '../types.js';
 
-export type Command = 'check' | 'emit' | 'explain' | 'coverage' | 'version' | 'help';
+export type Command = 'check' | 'emit' | 'explain' | 'coverage' | 'baseline' | 'version' | 'help';
 
 export type ParsedArgs = {
   command: Command;
@@ -19,6 +19,8 @@ export type ParsedArgs = {
   /** `--changed` with no value means "ask git". */
   changed?: readonly string[];
   emitCheck: boolean;
+  /** `baseline --write` or `baseline --prune`. */
+  baselineMode?: 'write' | 'prune';
   showBaselined: boolean;
   ingestGraph: boolean;
   writeGraph: boolean;
@@ -55,6 +57,8 @@ export const HELP = `archcheck — architecture conformance, declared once and c
   archcheck emit --check         fail if the committed output is stale
   archcheck explain <ruleId>     statement, remedy and current violations
   archcheck coverage             the three counts, computed from the manifest
+  archcheck baseline --write     record today's violations as pre-existing debt
+  archcheck baseline --prune     drop entries that no longer reproduce
   archcheck --version
 
 exit codes
@@ -99,25 +103,12 @@ export function parseArgs(argv: readonly string[]): Result<ParsedArgs> {
   };
   const errors: string[] = [];
   const rest = [...argv];
+  let sawCommand = false;
 
-  const first = rest[0];
-  if (first !== undefined && !first.startsWith('-')) {
-    switch (first) {
-      case 'emit':
-      case 'explain':
-      case 'coverage':
-        parsed.command = first;
-        rest.shift();
-        break;
-      case 'check':
-        parsed.command = 'check';
-        rest.shift();
-        break;
-      default:
-        errors.push(`unknown command '${first}' — see archcheck --help`);
-        rest.shift();
-    }
-  }
+  // The subcommand is recognised WHEREVER it appears, not only at argv[0]. `--cwd x baseline
+  // --write` is a perfectly natural thing to type, and a parser that silently rejected it read
+  // as "unexpected argument 'baseline'" — which names the wrong thing.
+  const COMMANDS = new Set(['check', 'emit', 'explain', 'coverage', 'baseline']);
 
   while (rest.length > 0) {
     const arg = rest.shift() as string;
@@ -175,6 +166,12 @@ export function parseArgs(argv: readonly string[]): Result<ParsedArgs> {
       case '--check':
         parsed.emitCheck = true;
         break;
+      case '--write':
+        parsed.baselineMode = 'write';
+        break;
+      case '--prune':
+        parsed.baselineMode = 'prune';
+        break;
       case '--show-baselined':
         parsed.showBaselined = true;
         break;
@@ -195,7 +192,11 @@ export function parseArgs(argv: readonly string[]): Result<ParsedArgs> {
       }
       default:
         if (flag.startsWith('-')) errors.push(`unknown flag '${flag}' — see archcheck --help`);
-        else if (parsed.command === 'explain' && parsed.ruleId === undefined) parsed.ruleId = flag;
+        else if (COMMANDS.has(flag) && !sawCommand) {
+          parsed.command = flag as Command;
+          sawCommand = true;
+        } else if (parsed.command === 'explain' && parsed.ruleId === undefined)
+          parsed.ruleId = flag;
         else errors.push(`unexpected argument '${flag}'`);
     }
   }
@@ -205,6 +206,14 @@ export function parseArgs(argv: readonly string[]): Result<ParsedArgs> {
   }
   if (parsed.emitCheck && parsed.command !== 'emit') {
     errors.push('--check applies to `archcheck emit` only');
+  }
+  if (parsed.baselineMode !== undefined && parsed.command !== 'baseline') {
+    errors.push('--write and --prune apply to `archcheck baseline` only');
+  }
+  if (parsed.command === 'baseline' && parsed.baselineMode === undefined) {
+    errors.push(
+      "baseline needs a mode: --write to record today's violations, --prune to drop what no longer reproduces",
+    );
   }
   if (parsed.writeGraph && parsed.ingestGraph) {
     errors.push(

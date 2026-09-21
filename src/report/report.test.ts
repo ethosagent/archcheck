@@ -21,6 +21,7 @@ function diagnostic(overrides: Partial<Diagnostic> = {}): Diagnostic {
     },
     detectedBy: ['graph'],
     baselined: false,
+    exempted: false,
     ...overrides,
   };
 }
@@ -53,6 +54,8 @@ const FIXED: RunResult = {
   ],
   skipped: [{ probe: 'judgement', reason: 'no credentials in the environment' }],
   coverage: { total: 5, deterministic: 3, proxy: 1, model: 1 },
+  baselineStale: [],
+  exceptions: [],
 };
 
 describe('terminal reporter', () => {
@@ -98,6 +101,8 @@ describe('terminal reporter', () => {
       diagnostics: [],
       skipped: [],
       coverage: { total: 5, deterministic: 5, proxy: 0, model: 0 },
+      baselineStale: [],
+      exceptions: [],
     };
     const text = (await reporterFor('terminal').report(clean, { noColor: true })) as string;
     expect(text).toContain('nothing to fix');
@@ -132,6 +137,8 @@ describe('json reporter', () => {
       diagnostics: [],
       skipped: [],
       coverage: { total: 0, deterministic: 0, proxy: 0, model: 0 },
+      baselineStale: [],
+      exceptions: [],
     };
     const report = toJsonReport(clean, {});
     expect(Object.keys(report)).toContain('skipped');
