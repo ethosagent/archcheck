@@ -10,6 +10,7 @@
  * `validate.ts`, because it must be able to return every problem at once rather than throwing on
  * the first (a malformed manifest exits 2, not 1).
  */
+import type { ArchitectureException } from '../exceptions/index.js';
 import type { Rule } from '../types.js';
 
 export type ArchitectureManifest = {
@@ -24,6 +25,11 @@ export type ArchitectureManifest = {
   generatedDir?: string;
   /** The only place a rule is defined. */
   rules: Rule[];
+  /**
+   * The only legitimate way past a rule: owned, reasoned and expiring. Never inline — an inline
+   * suppression comment is itself a violation (plan 12, plan 15).
+   */
+  exceptions?: ArchitectureException[];
 };
 
 export function defineArchitecture(config: ArchitectureManifest): ArchitectureManifest {

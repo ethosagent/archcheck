@@ -10,6 +10,8 @@
  * it can assume every rule is well-formed, which is why no downstream module re-validates.
  */
 import { join } from 'node:path';
+import type { ArchitectureException } from '../exceptions/index.js';
+import { validateExceptions } from '../exceptions/index.js';
 import { err, ok, type Result } from '../result.js';
 import type { ContractKind, Coverage, Rule } from '../types.js';
 import type { ArchitectureManifest } from './define.js';
@@ -27,6 +29,7 @@ export type Registry = {
   byId(id: string): Rule | undefined;
   byKind(kind: ContractKind): readonly Rule[];
   coverage(): Coverage;
+  exceptions(): readonly ArchitectureException[];
   /** The id ledger `emit` should write next. */
   ledger(): IdLedger;
 };
@@ -54,6 +57,7 @@ function createRegistry(loaded: LoadedManifest, ledger: IdLedger): Registry {
         model: count('model'),
       };
     },
+    exceptions: () => loaded.manifest.exceptions ?? [],
     ledger: () => ledger,
   };
 }
@@ -77,6 +81,9 @@ export function open(options: OpenOptions): Result<Registry> {
 
   const validated = validateManifest(loaded.manifest, options.validateParams);
   if (!validated.ok) return err(validated.error);
+
+  const exceptionsOk = validateExceptions(loaded.manifest.exceptions ?? [], loaded.manifest.rules);
+  if (!exceptionsOk.ok) return err(exceptionsOk.error);
 
   const ledger = readIdLedger(join(loaded.root, ID_LEDGER_PATH));
   if (options.skipIdCheck !== true) {
