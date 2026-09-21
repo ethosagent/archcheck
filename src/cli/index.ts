@@ -24,6 +24,10 @@ async function runCheck(args: ParsedArgs, cwd: string): Promise<ExitCode> {
   const loaded = load({ cwd });
   if (!loaded.ok) return fail(loaded.error, EXIT.config);
 
+  // Load-time warnings first: a judgement rule promoted to `error` is legal, and it must not be
+  // possible to promote one quietly.
+  for (const warning of loaded.value.registry.warnings()) console.error(`warning: ${warning}`);
+
   const changed = args.changed?.length === 0 ? gitChangedFiles(cwd) : args.changed;
   const result = await loaded.value.check({
     ...(changed === undefined ? {} : { changed }),

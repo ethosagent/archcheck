@@ -19,7 +19,7 @@ import {
   staleEntries,
   writeBaseline,
 } from './baseline/index.js';
-import { contractFor, validateParamsByKind } from './contracts/registry.js';
+import { contractFor, validateParamsByKind, warningsFor } from './contracts/registry.js';
 import type { ExplainCtx } from './contracts/types.js';
 import {
   applyEmit,
@@ -36,6 +36,7 @@ import type { ModuleGraph } from './graph/types.js';
 import { type NormalizeInput, normalize } from './normalize/index.js';
 import { createGraphProbe, GRAPH_REPORT_PATH, toGraphReport } from './probes/graph.js';
 import { createLintProbe } from './probes/lint.js';
+import { createModelProbe } from './probes/model/index.js';
 import { createStructureProbe } from './probes/structure.js';
 import { isSkip, type Probe, type RunCtx } from './probes/types.js';
 import { nextIdLedger } from './registry/ids.js';
@@ -108,7 +109,7 @@ export type LoadOptions = {
 const TIER_RANK: Record<Confidence, number> = { deterministic: 0, proxy: 1, model: 2 };
 
 function probes(): Probe[] {
-  return [createGraphProbe(), createLintProbe(), createStructureProbe()];
+  return [createGraphProbe(), createLintProbe(), createStructureProbe(), createModelProbe()];
 }
 
 export function load(options: LoadOptions = {}): Result<ArchCheck> {
@@ -116,6 +117,7 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
     cwd: options.cwd,
     configPath: options.configPath,
     validateParams: validateParamsByKind,
+    collectWarnings: warningsFor,
     skipIdCheck: options.skipIdCheck,
   });
   if (!opened.ok) return opened;

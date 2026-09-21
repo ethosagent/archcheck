@@ -20,9 +20,11 @@
     "node": ">=20"
   },
   "peerDependencies": {
-    "typescript": ">=5.4"
+    "typescript": ">=5.4",
+    "@anthropic-ai/sdk": ">=0.70.0"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.127.0",
     "@biomejs/biome": "^2.3.14",
     "@types/bun": "^1.4.2",
     "@types/node": "^22.10.2",
@@ -40,5 +42,10 @@
     "emit:check": "bash scripts/check-emit.sh",
     "format": "biome format --write .",
     "prepare": "lefthook install || true"
+  },
+  "peerDependenciesMeta": {
+    "@anthropic-ai/sdk": {
+      "optional": true
+    }
   }
 }

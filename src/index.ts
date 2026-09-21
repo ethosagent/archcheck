@@ -54,6 +54,16 @@ export {
   createNodeFileSystem,
   type FileSystem,
 } from './fs/index.js';
+export {
+  type Budget,
+  createModelProbe,
+  DEFAULT_BUDGET,
+  DEFAULT_MODEL,
+  type JudgeRequest,
+  type JudgeResponse,
+  type JudgeVerdict,
+  type LlmProvider,
+} from './probes/model/index.js';
 export { type ArchitectureManifest, defineArchitecture } from './registry/define.js';
 export type { Registry } from './registry/index.js';
 export {
