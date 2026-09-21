@@ -127,6 +127,10 @@ export function toSarif(result: RunResult, ctx: ReportCtx): Record<string, unkno
             detectedBy: diagnostic.detectedBy,
             baselined: diagnostic.baselined,
             exempted: diagnostic.exempted,
+            // SARIF has no field for "this result stands for N of the same thing", so the count
+            // and its lines ride in the properties bag like our other extras.
+            occurrences: diagnostic.occurrences ?? 1,
+            occurrenceLines: diagnostic.occurrenceLines ?? [],
             remedy: diagnostic.remedy,
             evidence: diagnostic.evidence,
           },

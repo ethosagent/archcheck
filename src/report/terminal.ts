@@ -50,6 +50,17 @@ function renderOne(diagnostic: Diagnostic, dim: Paint): string[] {
   if (diagnostic.remedy.allowed && diagnostic.remedy.allowed.length > 0) {
     lines.splice(2, 0, `    ${dim(`allowed: ${diagnostic.remedy.allowed.join(', ')}`)}`);
   }
+  // One identity can stand for several violations — three empty catches in one file are one hash
+  // (see `Diagnostic.occurrences`). The count and the lines are stated, or a reader fixes the one
+  // position printed above and wonders why the run still fails.
+  const occurrences = diagnostic.occurrences ?? 1;
+  if (occurrences > 1) {
+    const where =
+      diagnostic.occurrenceLines === undefined || diagnostic.occurrenceLines.length === 0
+        ? ''
+        : `: lines ${diagnostic.occurrenceLines.join(', ')}`;
+    lines.splice(2, 0, `    ${dim(`${occurrences} occurrences${where}`)}`);
+  }
   return lines;
 }
 

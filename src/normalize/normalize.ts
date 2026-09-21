@@ -45,6 +45,15 @@ function merge(existing: Diagnostic, incoming: Diagnostic): Diagnostic {
     line: existing.line ?? incoming.line,
     col: existing.col ?? incoming.col,
     endLine: existing.endLine ?? incoming.endLine,
+    // The count is the HIGHEST any single probe saw, never the sum: two probes each seeing this
+    // violation once is one violation, not two ('two probes observing ONE violation is one
+    // occurrence, not two' in normalize.test.ts), while three empty catches reported by one probe
+    // really are three ('several occurrences in one file collapse to ONE diagnostic that counts
+    // them'). Neither number reaches `evidence`, so the identity hash is untouched.
+    occurrences: Math.max(existing.occurrences ?? 1, incoming.occurrences ?? 1),
+    occurrenceLines: [
+      ...new Set([...(existing.occurrenceLines ?? []), ...(incoming.occurrenceLines ?? [])]),
+    ].sort((a, b) => a - b),
   };
 }
 
@@ -55,6 +64,8 @@ export function normalize(
   const baselined = options.baselined ?? new Set<string>();
   const byIdentity = new Map<string, Diagnostic>();
   const unknown = new Map<string, Set<string>>();
+  /** `identity\u0000probe` → how many findings THAT probe reported for it. See `merge`. */
+  const seenByProbe = new Map<string, number>();
 
   for (const input of inputs) {
     for (const finding of input.findings) {
@@ -71,6 +82,10 @@ export function normalize(
           ? finding.identity
           : computeIdentity(finding.ruleId, finding.evidence);
 
+      const probeKey = `${identity}\u0000${input.detectedBy}`;
+      const seen = (seenByProbe.get(probeKey) ?? 0) + 1;
+      seenByProbe.set(probeKey, seen);
+
       const refinement = options.refine?.(finding, rule);
       const diagnostic: Diagnostic = {
         ...finding,
@@ -81,6 +96,8 @@ export function normalize(
         confidence: rule.confidence,
         remedy: refinement?.remedy ?? rule.remedy,
         detectedBy: [input.detectedBy],
+        occurrences: seen,
+        occurrenceLines: finding.line === undefined ? [] : [finding.line],
         baselined: baselined.has(identity),
         // Set by applyExceptions() once today's date is known, which the normaliser has no
         // business knowing. Debt and policy are decided in different places on purpose.

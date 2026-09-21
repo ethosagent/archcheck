@@ -35,6 +35,9 @@ const FIXED: RunResult = {
       file: 'modules/ledger/domain/other.ts',
       line: 12,
       statement: 'domain may not import services',
+      // One identity, three places to fix. The reader is told all three.
+      occurrences: 3,
+      occurrenceLines: [12, 40, 61],
     }),
     diagnostic({
       identity: 'cccccccccccccccc',
@@ -88,6 +91,13 @@ describe('terminal reporter', () => {
     })) as string;
     expect(text).toContain('modules/old/domain/legacy.ts');
     expect(text).not.toContain('baselined, not shown');
+  });
+
+  test('a collapsed diagnostic says how many occurrences it stands for, and where', async () => {
+    const text = (await reporterFor('terminal').report(FIXED, { noColor: true })) as string;
+    expect(text).toContain('3 occurrences: lines 12, 40, 61');
+    // One extra line, and only where there is more than one occurrence.
+    expect(text.split('occurrences')).toHaveLength(2);
   });
 
   test('a skipped probe is stated, never silently omitted', async () => {

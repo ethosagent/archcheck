@@ -163,6 +163,22 @@ describe('our extras survive in properties', () => {
     });
   });
 
+  test('the occurrence count and its lines ride in the properties bag', () => {
+    const sarif = toSarif(
+      { ...RESULT, diagnostics: [diagnostic({ occurrences: 3, occurrenceLines: [4, 9, 14] })] },
+      {},
+    ) as { runs: { results: Record<string, unknown>[] }[] };
+    expect(sarif.runs[0]?.results[0]?.properties).toMatchObject({
+      occurrences: 3,
+      occurrenceLines: [4, 9, 14],
+    });
+  });
+
+  test('a single-occurrence result still states the count, rather than leaving it to be inferred', () => {
+    const sarif = toSarif(RESULT, {}) as { runs: { results: Record<string, unknown>[] }[] };
+    expect(sarif.runs[0]?.results[0]?.properties).toMatchObject({ occurrences: 1 });
+  });
+
   test('the identity hash doubles as a SARIF partial fingerprint, so runs diff cleanly', () => {
     const sarif = toSarif(RESULT, {}) as { runs: { results: Record<string, unknown>[] }[] };
     expect(sarif.runs[0]?.results[0]?.partialFingerprints).toEqual({

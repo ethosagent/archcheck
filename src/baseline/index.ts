@@ -35,10 +35,19 @@ export function readBaseline(root: string): Baseline {
     if (!Array.isArray(entries)) return EMPTY_BASELINE;
     return {
       version: 1,
-      entries: entries.filter(
-        (entry): entry is BaselineEntry =>
-          typeof entry?.identity === 'string' && typeof entry?.ruleId === 'string',
-      ),
+      entries: entries
+        .filter(
+          (entry): entry is BaselineEntry =>
+            typeof entry?.identity === 'string' && typeof entry?.ruleId === 'string',
+        )
+        // An entry written before `occurrences` existed reads as one occurrence, so an existing
+        // baseline file keeps working unchanged — 'an entry written before occurrences existed
+        // still loads, and reads as one' in baseline.test.ts.
+        .map((entry) => ({
+          ...entry,
+          occurrences:
+            typeof entry.occurrences === 'number' && entry.occurrences > 0 ? entry.occurrences : 1,
+        })),
     };
   } catch {
     // No baseline is the normal state for a repo that never needed one.
@@ -48,6 +57,13 @@ export function readBaseline(root: string): Baseline {
 
 export function identitiesOf(baseline: Baseline): ReadonlySet<string> {
   return new Set(baseline.entries.map((entry) => entry.identity));
+}
+
+/** How many occurrences each identity has RIGHT NOW. Absent means it did not reproduce at all. */
+function currentCounts(diagnostics: readonly Diagnostic[]): Map<string, number> {
+  return new Map(
+    diagnostics.map((diagnostic) => [diagnostic.identity, diagnostic.occurrences ?? 1]),
+  );
 }
 
 /** Sorted by identity so a diff of this file is reviewable rather than a reshuffle. */
@@ -67,30 +83,56 @@ export function nextBaseline(
   const kept = new Map(previous.entries.map((entry) => [entry.identity, entry]));
   for (const diagnostic of diagnostics) {
     if (diagnostic.severity !== 'error' || diagnostic.exempted) continue;
-    if (kept.has(diagnostic.identity)) continue;
+    const existing = kept.get(diagnostic.identity);
+    // An existing entry keeps its addedAt but takes today's count: `--write` records what is
+    // failing right now. Only identities that REPRODUCED are touched, so a degraded run — where a
+    // skipped probe reports nothing — cannot quietly rewrite a count to zero.
     kept.set(diagnostic.identity, {
-      identity: diagnostic.identity,
-      ruleId: diagnostic.ruleId,
-      addedAt: today,
-      note: 'pre-existing at adoption',
+      ...(existing ?? {
+        identity: diagnostic.identity,
+        ruleId: diagnostic.ruleId,
+        addedAt: today,
+        note: 'pre-existing at adoption',
+      }),
+      occurrences: diagnostic.occurrences ?? 1,
     });
   }
   return { version: 1, entries: sorted([...kept.values()]) };
 }
 
-/** Entries that no longer reproduce. These are what exit 4 is about. */
+/**
+ * Entries that no longer describe reality. These are what exit 4 is about — and a count that has
+ * come DOWN is the same news as a finding that has gone: two of three empty catches fixed leaves
+ * an entry recording more debt than exists, which is exactly what `--prune` is for. A count that
+ * has gone UP is the opposite news, and `src/archcheck.ts` fails the run for it instead.
+ */
 export function staleEntries(
   baseline: Baseline,
   diagnostics: readonly Diagnostic[],
 ): BaselineEntry[] {
-  const reproduced = new Set(diagnostics.map((diagnostic) => diagnostic.identity));
-  return sorted(baseline.entries.filter((entry) => !reproduced.has(entry.identity)));
+  const current = currentCounts(diagnostics);
+  return sorted(
+    baseline.entries.filter((entry) => (current.get(entry.identity) ?? 0) < entry.occurrences),
+  );
 }
 
-/** `baseline --prune`: drop what no longer reproduces. The only way the file shrinks. */
+/**
+ * `baseline --prune`: drop what no longer reproduces, and reduce the count of what partly does.
+ * The only way the file shrinks.
+ */
 export function prunedBaseline(baseline: Baseline, diagnostics: readonly Diagnostic[]): Baseline {
-  const stale = new Set(staleEntries(baseline, diagnostics).map((entry) => entry.identity));
-  return { version: 1, entries: sorted(baseline.entries.filter((e) => !stale.has(e.identity))) };
+  const current = currentCounts(diagnostics);
+  return {
+    version: 1,
+    entries: sorted(
+      baseline.entries
+        .filter((entry) => current.has(entry.identity))
+        .map((entry) => ({
+          ...entry,
+          occurrences: current.get(entry.identity) ?? entry.occurrences,
+        })),
+    ),
+  };
 }
 
 export function writeBaseline(root: string, baseline: Baseline): string {

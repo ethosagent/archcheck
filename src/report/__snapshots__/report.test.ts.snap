@@ -10,6 +10,7 @@ exports[`terminal reporter groups by confidence, deterministic first, and shows 
 
   domain may not import services                    domain-no-service-import
     modules/ledger/domain/other.ts:12
+    3 occurrences: lines 12, 40, 61
     allowed: contracts, rules
     → invert the call: the service calls the domain, never the reverse
 

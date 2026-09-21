@@ -103,6 +103,20 @@ export type Diagnostic = RawFinding & {
    * evidence (plan 07).
    */
   detectedBy: string[];
+  /**
+   * How many raw findings collapsed into this one identity — normally 1. Evidence carries no
+   * position by design, so two empty catches in one file are literally the same evidence and the
+   * same hash (`computeIdentity`, src/normalize/identity.ts); this count is what keeps "one
+   * diagnostic" from being read as "one violation". It lives HERE and not in `evidence` precisely
+   * so the hash is untouched — pinned by 'counting occurrences leaves the identity hash alone' in
+   * src/normalize/normalize.test.ts.
+   *
+   * Optional because a required field would break every existing producer of the agent contract.
+   * Absent means 1; `normalize()` always sets it.
+   */
+  occurrences?: number;
+  /** Where those occurrences are, sorted and de-duplicated. Only the lines a probe reported. */
+  occurrenceLines?: number[];
   /** Recorded in the baseline as pre-existing debt. Debt, not policy — see `exempted`. */
   baselined: boolean;
   /**
@@ -114,12 +128,22 @@ export type Diagnostic = RawFinding & {
   exempted: boolean;
 };
 
-/** One recorded pre-existing violation. Keyed by identity, never by line or by count. */
+/**
+ * One recorded pre-existing violation. KEYED by identity, never by line — but it also records how
+ * many occurrences that identity stood for, because one identity can cover several violations of
+ * one rule in one file (see `Diagnostic.occurrences`). Without the count, a single entry would
+ * suppress every later occurrence in that file for ever.
+ *
+ * An entry written before this field existed reads as 1, filled in by `readBaseline`
+ * (src/baseline/index.ts), so no existing baseline file is invalidated.
+ */
 export type BaselineEntry = {
   identity: string;
   ruleId: string;
   /** ISO date. For auditing how long a piece of debt has been carried. */
   addedAt: string;
+  /** How many occurrences this identity covered when it was recorded. At least 1. */
+  occurrences: number;
   note?: string;
 };
 

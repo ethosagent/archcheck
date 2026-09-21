@@ -211,6 +211,64 @@ describe('deduplication', () => {
     expect(result.value).toHaveLength(2);
   });
 
+  test('several occurrences in one file collapse to ONE diagnostic that counts them', () => {
+    // Three empty catches in one file produce evidence that is identical BY CONSTRUCTION — the
+    // snippet is the literal `catch {}` every time. One diagnostic is right; reporting it as one
+    // violation is not, and a baseline entry for it must not cover a fourth one added later.
+    const result = normalize(
+      [
+        {
+          findings: [finding({ line: 12 }), finding({ line: 33 }), finding({ line: 20 })],
+          detectedBy: 'lint',
+        },
+      ],
+      { byId },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toHaveLength(1);
+    expect(result.value[0]?.occurrences).toBe(3);
+    // Sorted and de-duplicated, so a reader fixing three empty catches can find all three.
+    expect(result.value[0]?.occurrenceLines).toEqual([12, 20, 33]);
+  });
+
+  test('a lone finding is one occurrence', () => {
+    const result = normalize([{ findings: [finding()], detectedBy: 'graph' }], { byId });
+    if (!result.ok) return;
+    expect(result.value[0]?.occurrences).toBe(1);
+    expect(result.value[0]?.occurrenceLines).toEqual([4]);
+  });
+
+  test('counting occurrences leaves the identity hash alone — evidence never learned a position', () => {
+    const one = normalize([{ findings: [finding({ line: 12 })], detectedBy: 'lint' }], { byId });
+    const three = normalize(
+      [
+        {
+          findings: [finding({ line: 12 }), finding({ line: 20 }), finding({ line: 33 })],
+          detectedBy: 'lint',
+        },
+      ],
+      { byId },
+    );
+    if (!one.ok || !three.ok) return;
+    expect(three.value[0]?.identity).toBe(one.value[0]?.identity ?? 'differs');
+  });
+
+  test('two probes observing ONE violation is one occurrence, not two', () => {
+    // The counterpart of the collapse test above: deduplication across probes is one violation
+    // seen twice, and counting it twice would baseline a phantom.
+    const result = normalize(
+      [
+        { findings: [finding()], detectedBy: 'graph' },
+        { findings: [finding({ line: undefined })], detectedBy: 'lint' },
+      ],
+      { byId },
+    );
+    if (!result.ok) return;
+    expect(result.value[0]?.occurrences).toBe(1);
+    expect(result.value[0]?.occurrenceLines).toEqual([4]);
+  });
+
   test('a probe-supplied identity is honoured rather than recomputed', () => {
     const result = normalize(
       [{ findings: [finding({ identity: 'preset0000000000' })], detectedBy: 'x' }],
