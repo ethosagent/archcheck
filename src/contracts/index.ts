@@ -1,4 +1,14 @@
 export {
+  asBannedSyntaxParams,
+  BANNED_CONSTRUCTS,
+  type BannedConstruct,
+  type BannedOccurrence,
+  type BannedSyntaxParams,
+  bannedSyntaxApplies,
+  bannedSyntaxContract,
+  findBannedOccurrences,
+} from './banned-syntax.js';
+export {
   asEncapsulationParams,
   type EncapsulationParams,
   type EncapsulationVerdict,
@@ -17,5 +27,14 @@ export {
   layersContract,
   resolveEdge,
 } from './layers.js';
+export {
+  asNamingParams,
+  describeExpectation,
+  type NamingParams,
+  type NamingTarget,
+  nameIsWellFormed,
+  namingApplies,
+  namingContract,
+} from './naming.js';
 export { contractFor, implementedKinds, validateParamsByKind } from './registry.js';
-export type { ContractType, EmitCtx, ValidateCtx } from './types.js';
+export type { ContractType, EmitCtx, ExplainCtx, Refinement, ValidateCtx } from './types.js';
