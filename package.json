@@ -51,11 +51,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/miteshsharma/archcheck.git"
+    "url": "git+https://github.com/ethosagent/archcheck.git"
   },
-  "homepage": "https://github.com/miteshsharma/archcheck#readme",
+  "homepage": "https://github.com/ethosagent/archcheck#readme",
   "bugs": {
-    "url": "https://github.com/miteshsharma/archcheck/issues"
+    "url": "https://github.com/ethosagent/archcheck/issues"
   },
   "keywords": [
     "architecture",
