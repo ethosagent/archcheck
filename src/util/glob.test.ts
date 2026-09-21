@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { matches, matchesAny } from './glob.js';
+import { globProblems, matches, matchesAny } from './glob.js';
 
 describe('glob', () => {
   test('* does not cross a slash', () => {
@@ -79,5 +79,65 @@ describe('glob', () => {
     const patterns = ['src/**', '!src/**/*.test.ts'];
     expect(matchesAny(patterns, 'src/graph/edges.ts')).toBe(true);
     expect(matchesAny(patterns, 'src/graph/edges.test.ts')).toBe(false);
+  });
+});
+
+describe('globProblems', () => {
+  test('every shape the matcher supports is sound', () => {
+    const sound = [
+      'src/**',
+      'src/util/**',
+      'src/util/',
+      'architecture.config.ts',
+      'modules/*/rules/**',
+      '**/*.{ts,tsx,js,jsx}',
+      '**',
+      'a/**/**/b',
+      'a?.ts',
+      '!src/**/*.test.ts',
+      'fixtures/rules/{id}.violation.ts',
+    ];
+    for (const pattern of sound) {
+      expect(globProblems(pattern)).toEqual([]);
+    }
+  });
+
+  test('an empty pattern is a problem, because it matches nothing', () => {
+    expect(globProblems('')).toHaveLength(1);
+    expect(globProblems('')[0]).toContain('empty');
+    // A bare negation is an empty pattern once the `!` is stripped.
+    expect(globProblems('!')).toHaveLength(1);
+  });
+
+  test('a leading separator is a problem, because every path is repo-relative', () => {
+    expect(globProblems('/src/**')).toHaveLength(1);
+    expect(globProblems('/src/**')[0]).toContain('repo-relative');
+    expect(globProblems('!/src/**')).toHaveLength(1);
+  });
+
+  test('a doubled separator is a problem — it asks for an empty path segment', () => {
+    expect(globProblems('src//util/**')).toHaveLength(1);
+    expect(globProblems('src//util/**')[0]).toContain('segment');
+  });
+
+  test('an unclosed brace is a problem', () => {
+    expect(globProblems('src/*.{ts,tsx')).toHaveLength(1);
+    expect(globProblems('src/*.{ts,tsx')[0]).toContain('{');
+  });
+
+  test('an empty brace alternative is a problem', () => {
+    expect(globProblems('src/*.{ts,,tsx}')).toHaveLength(1);
+    expect(globProblems('src/*.{}')).toHaveLength(1);
+    expect(globProblems('src/*.{,ts}')).toHaveLength(1);
+    expect(globProblems('src/*.{ts,}')).toHaveLength(1);
+  });
+
+  test('the negation prefix is stripped before checking, not reported', () => {
+    expect(globProblems('!src/**')).toEqual([]);
+    expect(globProblems('!src//x')).toEqual(globProblems('src//x'));
+  });
+
+  test('every problem is returned at once, not the first', () => {
+    expect(globProblems('/src//*.{ts').length).toBeGreaterThanOrEqual(3);
   });
 });

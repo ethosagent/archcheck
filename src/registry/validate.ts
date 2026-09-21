@@ -11,7 +11,8 @@
  * two together is the facade's job, which keeps this module testable without any kind at all.
  */
 import { err, ok, type Result } from '../result.js';
-import { CONTRACT_KINDS, type Rule } from '../types.js';
+import { CONTRACT_KINDS, type ContractKind, type Rule } from '../types.js';
+import { globProblems } from '../util/glob.js';
 import type { ArchitectureManifest } from './define.js';
 
 /**
@@ -25,6 +26,54 @@ export type ParamsValidator = (rule: Rule, rules: readonly Rule[]) => Result<voi
 const SEVERITIES = new Set(['error', 'warn', 'advisory', 'off']);
 const CONFIDENCES = new Set(['deterministic', 'proxy', 'model']);
 const ID_SHAPE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/**
+ * Where each kind spells a path glob. A table rather than a per-kind branch, and it is still only
+ * WHERE, never what the field means — the registry knows a rule has a kind and nothing more (see
+ * this module's header). A kind absent from the table simply names no globs.
+ */
+const GLOB_FIELDS: Partial<Record<ContractKind, readonly string[]>> = {
+  layers: ['match'],
+  encapsulation: ['module'],
+  naming: ['appliesTo'],
+  'banned-syntax': ['appliesTo'],
+  'declared-field': ['appliesTo'],
+  judgement: ['appliesTo'],
+  'required-file': ['forEach'],
+};
+
+/**
+ * A `required-file` `forEach` may be `rule[severity=error]`, which selects RULES, not paths.
+ * Recognised here by its prefix rather than by importing `isRuleSelector`
+ * (`src/contracts/required-file.ts`), because `registry-knows-only-rules` in
+ * `architecture.config.ts` forbids `src/registry` importing `src/contracts` — and duplicating a
+ * five-character prefix is far cheaper than the alternative the layer law is protecting against.
+ * Deliberately looser than the real selector regex: anything selector-SHAPED is left alone here,
+ * and the kind's own validate owns the grammar.
+ */
+const RULE_SELECTOR_PREFIX = 'rule[';
+
+/** A glob field is a string or a list of them; `layers.match` may instead be `{ implements }`. */
+function globsIn(value: unknown): string[] {
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) return value.filter((entry) => typeof entry === 'string');
+  // `{ implements: 'Port' }` names a type, not a path. Any other shape is the kind's to complain
+  // about; this pass only checks patterns that really are patterns.
+  return [];
+}
+
+function checkGlobs(
+  field: string,
+  value: unknown,
+  push: (field: string, problem: string) => void,
+): void {
+  for (const pattern of globsIn(value)) {
+    if (pattern.startsWith(RULE_SELECTOR_PREFIX)) continue;
+    for (const problem of globProblems(pattern)) {
+      push(field, `pattern '${pattern}' ${problem}`);
+    }
+  }
+}
 
 function at(index: number, id: unknown): string {
   return typeof id === 'string' && id.length > 0 ? `rules[${index}] '${id}'` : `rules[${index}]`;
@@ -92,6 +141,18 @@ function validateRule(
     if (!kindResult.ok) for (const problem of kindResult.error) errors.push(`${where}: ${problem}`);
   }
 
+  // Glob well-formedness, in the SHARED pass rather than in any kind's validate: a malformed
+  // pattern matches nothing, and outside `layers.match` a rule that matches nothing is
+  // indistinguishable from a rule that passes (AGENTS.md rule 14). Here, every present and future
+  // kind gets the check without opting in. Last, so a bad pattern never hides the kind's own
+  // complaints. `globProblems` (src/util/glob.ts) decides what counts as malformed.
+  if (typeof rule?.params === 'object' && rule.params !== null) {
+    const params = rule.params as Record<string, unknown>;
+    for (const field of GLOB_FIELDS[rule.kind] ?? []) {
+      checkGlobs(`params.${field}`, params[field], push);
+    }
+  }
+
   return errors;
 }
 
@@ -129,6 +190,17 @@ export function validateManifest(
           'a replaced id must be gone, or nothing was replaced',
       );
     }
+  }
+
+  // An exception's `path` is a glob like any other, and an exception that matches nothing suppresses
+  // nothing while still reading as a granted allowance. The rest of the exception's shape belongs to
+  // `validateExceptions` (src/exceptions/index.ts); only the pattern is checked here, so the glob
+  // check stays in one place for every field of the manifest.
+  const exceptions = Array.isArray(manifest.exceptions) ? manifest.exceptions : [];
+  for (const [index, exception] of exceptions.entries()) {
+    checkGlobs('path', exception?.path, (field, problem) =>
+      errors.push(`exceptions[${index}]: ${field} ${problem}`),
+    );
   }
 
   return errors.length > 0 ? err(errors) : ok(manifest);

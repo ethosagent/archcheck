@@ -2,8 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { ok, type Result } from '../result.js';
+import type { Rule } from '../types.js';
 import { open } from './index.js';
 import { loadManifestFrom } from './load.js';
+import { validateManifest } from './validate.js';
 
 const FIXTURES = join(import.meta.dir, '..', '..', 'fixtures', 'manifests');
 const config = (name: string) => join(FIXTURES, name, 'architecture.config.ts');
@@ -132,5 +134,105 @@ describe('coverage', () => {
       // The registry's default is "every kind is checkable"; the facade injects the truth.
       unchecked: 0,
     });
+  });
+});
+
+describe('glob well-formedness', () => {
+  /** A sound envelope, so only the glob under test can be what fails. */
+  const rule = (over: Partial<Rule>): Rule => ({
+    id: 'a-rule',
+    kind: 'naming',
+    statement: 'a name looks like a name',
+    severity: 'error',
+    confidence: 'deterministic',
+    params: { appliesTo: 'src/**' },
+    remedy: { summary: 'rename it' },
+    ...over,
+  });
+
+  test('a malformed glob is rejected, naming the rule, the field and the pattern', () => {
+    const result = validateManifest(
+      { rules: [rule({ params: { appliesTo: ['src/**', 'src//broken'] } })] },
+      anyParams,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const joined = result.error.join('\n');
+    expect(joined).toContain("rules[0] 'a-rule': params.appliesTo");
+    expect(joined).toContain("'src//broken'");
+  });
+
+  test('the shared pass checks every kind that names a glob, in one pass', () => {
+    const result = validateManifest(
+      {
+        rules: [
+          rule({ id: 'r-layers', kind: 'layers', params: { name: 'l', match: '/src/**' } }),
+          rule({ id: 'r-encap', kind: 'encapsulation', params: { module: 'modules//*' } }),
+          rule({ id: 'r-naming', params: { appliesTo: '' } }),
+          rule({ id: 'r-banned', kind: 'banned-syntax', params: { appliesTo: 'src/*.{ts' } }),
+          rule({ id: 'r-declared', kind: 'declared-field', params: { appliesTo: 'src/*.{a,,b}' } }),
+          rule({ id: 'r-judgement', kind: 'judgement', params: { appliesTo: '/x' } }),
+          rule({ id: 'r-required', kind: 'required-file', params: { forEach: 'src//ports/*.ts' } }),
+        ],
+      },
+      anyParams,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    for (const id of [
+      'r-layers',
+      'r-encap',
+      'r-naming',
+      'r-banned',
+      'r-declared',
+      'r-judgement',
+      'r-required',
+    ]) {
+      expect(result.error.join('\n')).toContain(`'${id}'`);
+    }
+  });
+
+  test('an implements match and a rule selector are not globs, and are left alone', () => {
+    const result = validateManifest(
+      {
+        rules: [
+          rule({
+            id: 'r-implements',
+            kind: 'layers',
+            params: { name: 'a', match: { implements: 'Port' } },
+          }),
+          rule({
+            id: 'r-selector',
+            kind: 'required-file',
+            params: { forEach: 'rule[severity=error]', expect: 'fixtures/{id}.ts' },
+          }),
+        ],
+      },
+      anyParams,
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  test("an exception's path glob is checked too, and names the exception", () => {
+    const result = validateManifest(
+      {
+        rules: [rule({})],
+        exceptions: [
+          {
+            rule: 'a-rule',
+            path: ['src/**', '/src/x/**'],
+            owner: 'someone',
+            expires: '2099-01-01',
+            reason: 'because',
+          },
+        ],
+      },
+      anyParams,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const joined = result.error.join('\n');
+    expect(joined).toContain('exceptions[0]: path');
+    expect(joined).toContain("'/src/x/**'");
   });
 });

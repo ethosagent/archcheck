@@ -24,8 +24,12 @@ const SPECIAL = /[.+^${}()|[\]\\]/g;
  * ponytail: a brace group containing a slash (`{a/b,c}`) is not supported, because the split
  * happens first. Nothing in this repo or its fixtures writes one. Upgrade path if that changes:
  * tokenise before splitting instead of after.
+ *
+ * `problems`, when supplied, collects the structural defects this walk sees — the sink
+ * `globProblems` passes in so that the validator and the compiler are one walk and cannot
+ * disagree. Compilation is unchanged either way: nothing here reads the sink back.
  */
-function segmentToRegex(pattern: string): string {
+function segmentToRegex(pattern: string, problems?: string[]): string {
   let out = '';
   let i = 0;
   while (i < pattern.length) {
@@ -44,10 +48,14 @@ function segmentToRegex(pattern: string): string {
       const close = pattern.indexOf('}', i);
       if (close !== -1) {
         const alts = pattern.slice(i + 1, close).split(',');
-        out += `(?:${alts.map((a) => segmentToRegex(a)).join('|')})`;
+        if (alts.some((a) => a.length === 0)) {
+          problems?.push(`has an empty alternative in the group '${pattern.slice(i, close + 1)}'`);
+        }
+        out += `(?:${alts.map((a) => segmentToRegex(a, problems)).join('|')})`;
         i = close + 1;
         continue;
       }
+      problems?.push("has an unclosed '{'");
     }
     out += ch.replace(SPECIAL, '\\$&');
     i += 1;
@@ -116,6 +124,48 @@ function patternToRegexSource(pattern: string): string {
   }
 
   return out;
+}
+
+/**
+ * The structural defects in a pattern — empty when it is sound. One sentence per defect, every one
+ * at once, each phrased to follow a field name so a caller can compose "params.appliesTo pattern
+ * 'x' has an empty path segment ...".
+ *
+ * Why it exists: a pattern that matches nothing is indistinguishable from a rule that is satisfied
+ * (AGENTS.md rule 14). `layers.match` fails loudly when it matches nothing — the files become
+ * unlayered — but every other glob in a manifest just stops checking, silently and forever.
+ *
+ * Why it walks the SAME segments as the compiler, through `toSegments` and `segmentToRegex`: a
+ * second, independent parser would drift from `patternToRegexSource` and start approving patterns
+ * the matcher quietly drops. So this reports only what that walk decides structurally, and it is
+ * deliberately silent about whether any file exists — "this matches nothing in THIS repo" needs the
+ * file list and is a warning, not an error.
+ *
+ * Called from the shared pass in `src/registry/validate.ts`, so every rule kind is covered without
+ * opting in. Pinned by the `globProblems` suite in `src/util/glob.test.ts`.
+ */
+export function globProblems(pattern: string): string[] {
+  // A negation is legal in every list form (`matchesAny`), and it is not part of the path.
+  const body = pattern.startsWith('!') ? pattern.slice(1) : pattern;
+  if (body.length === 0) return ['is empty, so it matches nothing'];
+
+  const problems: string[] = [];
+  if (body.startsWith('/')) {
+    problems.push('starts with a separator, but every path it is matched against is repo-relative');
+  }
+
+  for (const [index, segment] of toSegments(body).entries()) {
+    if (segment === '') {
+      // Index 0 is the leading separator, already named. A trailing separator is folded to a
+      // globstar by `toSegments` and is legal, so any empty segment left here is a doubled one.
+      if (index > 0) problems.push('has an empty path segment, from a doubled separator');
+      continue;
+    }
+    if (segment === '**') continue;
+    segmentToRegex(segment, problems);
+  }
+
+  return problems;
 }
 
 const cache = new Map<string, RegExp>();
