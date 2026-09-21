@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { contractFor } from '../contracts/registry.js';
 import { nextIdLedger } from '../registry/ids.js';
 import type { Rule } from '../types.js';
-import { applyEmit, checkEmit, planEmit } from './index.js';
+import { applyEmit, checkEmit, describeUnimplemented, planEmit } from './index.js';
 import { sortDeep } from './merge.js';
 
 function layerRule(id: string, name: string, mayImport: string[], extra = {}): Rule {
@@ -36,11 +36,12 @@ function inTempRepo<T>(body: (root: string) => T): T {
   }
 }
 
-function plan(root: string, rules: readonly Rule[] = RULES) {
+function plan(root: string, rules: readonly Rule[] = RULES, docs: readonly string[] = []) {
   return planEmit({
     root,
     configPath: join(root, 'architecture.config.ts'),
     rules,
+    docs,
     coverage: {
       total: rules.length,
       deterministic: rules.length,
@@ -225,5 +226,59 @@ describe('an unimplemented kind', () => {
       ];
       expect(plan(root, withUnimplemented).unimplemented).toEqual(['forbidden']);
     });
+  });
+});
+
+describe('a document the manifest declares', () => {
+  const ledger = () => nextIdLedger({ schemaVersion: 1, ids: [] }, RULES);
+
+  test('that cannot be read is stale, not silently dropped from the plan', () => {
+    inTempRepo((root) => {
+      // The operator NAMED this file. `readDocument` returning undefined used to drop it, so
+      // `emit --check` never compared it and answered "up to date".
+      applyEmit(plan(root, RULES, ['PATTERNS.md']), ledger());
+      expect(checkEmit(plan(root, RULES, ['PATTERNS.md']))).toEqual([
+        { path: 'PATTERNS.md', reason: 'unreadable' },
+      ]);
+    });
+  });
+
+  test('that exists with no fence is still left alone, on purpose', () => {
+    inTempRepo((root) => {
+      const doc = join(root, 'PATTERNS.md');
+      writeFileSync(doc, '# Patterns\n\nNo generated region was ever asked for.\n');
+      applyEmit(plan(root, RULES, ['PATTERNS.md']), ledger());
+      expect(checkEmit(plan(root, RULES, ['PATTERNS.md']))).toEqual([]);
+      expect(readFileSync(doc, 'utf8')).toBe(
+        '# Patterns\n\nNo generated region was ever asked for.\n',
+      );
+    });
+  });
+});
+
+describe('describeUnimplemented', () => {
+  const FORBIDDEN: Rule = {
+    id: 'one-specific-edge',
+    kind: 'forbidden',
+    statement: 'this one edge is banned',
+    severity: 'error',
+    confidence: 'deterministic',
+    params: { from: 'a/**', to: 'b/**' },
+    remedy: { summary: 'do not import it' },
+  };
+
+  test('names the kind emit generated nothing for', () => {
+    const lines = describeUnimplemented([...RULES, FORBIDDEN]);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("'forbidden'");
+    expect(lines[0]).toContain('no configuration');
+  });
+
+  test('says nothing when every declared kind has a contract type', () => {
+    expect(describeUnimplemented(RULES)).toEqual([]);
+  });
+
+  test('a rule switched off asks for no configuration, so it is not reported', () => {
+    expect(describeUnimplemented([...RULES, { ...FORBIDDEN, severity: 'off' }])).toEqual([]);
   });
 });

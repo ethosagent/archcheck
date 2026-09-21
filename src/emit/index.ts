@@ -7,6 +7,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { implementedKinds } from '../contracts/index.js';
 import type { ContractType, EmitCtx } from '../contracts/types.js';
 import {
   RULES_JSON,
@@ -35,6 +36,14 @@ export type EmitPlan = {
   target: EmitTarget;
   /** Documents whose fenced region this manifest would replace. Paths are repo-relative. */
   docs: { path: string; content: string }[];
+  /**
+   * Documents `manifest.docs` names that could not be read. `checkEmit` reports these as
+   * `unreadable` rather than dropping them: the operator named the file, so its absence is news,
+   * the same way `checkSinks` reports a sink that was never generated. A document that IS there
+   * and carries no fence is a different case and is left alone — `src/emit/emit.test.ts` →
+   * 'a document the manifest declares' pins both halves.
+   */
+  unreadableDocs: string[];
 };
 
 export type PlanOptions = {
@@ -67,9 +76,13 @@ export function planEmit(options: PlanOptions): EmitPlan {
 
   const table = renderRulesTable(document);
   const docs: EmitPlan['docs'] = [];
+  const unreadableDocs: string[] = [];
   for (const relative of options.docs ?? []) {
     const existing = readDocument(options.root, relative);
-    if (existing === undefined) continue;
+    if (existing === undefined) {
+      unreadableDocs.push(relative);
+      continue;
+    }
     const replaced = replaceFencedRegion(existing, table);
     // No fence means the document never asked for a generated region. Not an error, and not a
     // reason to grow one by surprise.
@@ -81,14 +94,43 @@ export function planEmit(options: PlanOptions): EmitPlan {
     unimplemented,
     target: { root: options.root, generatedDir: options.generatedDir ?? DEFAULT_GENERATED_DIR },
     docs,
+    unreadableDocs,
   };
+}
+
+/**
+ * What `emit` says about a rule kind it generated no configuration for.
+ *
+ * `emit` is its own command: a CI lane that runs only `archcheck emit` sees neither
+ * `RunResult.skipped` nor `Coverage.unchecked`, so without this line a `forbidden` rule emits no
+ * fragment, prints nothing, and the editor configs the rule was declared for silently lack it.
+ * Same fact `collectFragments` records as `EmitPlan.unimplemented`, read from the rules alone
+ * because the CLI holds no plan. `src/emit/emit.test.ts` → 'describeUnimplemented' pins it.
+ */
+export function describeUnimplemented(rules: readonly Rule[]): string[] {
+  const implemented = new Set(implementedKinds());
+  const kinds = [
+    ...new Set(rules.filter((rule) => rule.severity !== 'off').map((rule) => rule.kind)),
+  ]
+    .filter((kind) => !implemented.has(kind))
+    .sort();
+  if (kinds.length === 0) return [];
+  const named = kinds.map((kind) => `'${kind}'`).join(', ');
+  return [
+    `warning: no configuration was generated for ${named} — no contract type implements ` +
+      `${kinds.length === 1 ? 'that kind' : 'those kinds'} yet`,
+    '  → those rules are declared, not enforced: `archcheck` reports them under skipped',
+  ];
 }
 
 function readDocument(root: string, relative: string): string | undefined {
   try {
     return readFileSync(join(root, relative), 'utf8');
   } catch {
-    return undefined; // a document that is not there cannot be stale
+    // Undefined means "could not read it", and whether that is news belongs to the caller:
+    // `planEmit` reports a document the manifest named, `applyEmit` and `checkEmit` treat an
+    // unreadable file as "differs from what we would write".
+    return undefined;
   }
 }
 
@@ -117,6 +159,7 @@ export function applyEmit(plan: EmitPlan, ledger: IdLedger): EmitOutcome {
 
 export function checkEmit(plan: EmitPlan): StaleFile[] {
   const stale = checkSinks(plan.target, plan.files);
+  for (const path of plan.unreadableDocs) stale.push({ path, reason: 'unreadable' });
   for (const doc of plan.docs) {
     // Hand-editing inside the fence is the failure this catches: the region is generated, so a
     // human edit there is lost on the next emit and disagrees with the manifest until then.

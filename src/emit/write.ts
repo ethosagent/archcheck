@@ -51,7 +51,8 @@ export function writeSinks(target: EmitTarget, files: readonly SinkFile[]): Writ
 
 export type StaleFile = {
   path: string;
-  reason: 'missing' | 'hand-edited';
+  /** `unreadable` is a document `manifest.docs` names that is not there — see `planEmit`. */
+  reason: 'missing' | 'hand-edited' | 'unreadable';
 };
 
 export function checkSinks(target: EmitTarget, files: readonly SinkFile[]): StaleFile[] {
@@ -65,10 +66,15 @@ export function checkSinks(target: EmitTarget, files: readonly SinkFile[]): Stal
   return stale;
 }
 
+/** A Record over the reasons, so a new reason cannot be added without a sentence for it. */
+const STALE_REASON: Record<StaleFile['reason'], string> = {
+  missing: 'has never been generated',
+  unreadable:
+    'is named in docs but could not be read — create it with an archcheck fence, or drop it ' +
+    'from the manifest',
+  'hand-edited': 'does not match the manifest — it was hand-edited, or the manifest changed',
+};
+
 export function describeStale(stale: readonly StaleFile[]): string[] {
-  return stale.map(({ path, reason }) =>
-    reason === 'missing'
-      ? `${path} has never been generated`
-      : `${path} does not match the manifest — it was hand-edited, or the manifest changed`,
-  );
+  return stale.map(({ path, reason }) => `${path} ${STALE_REASON[reason]}`);
 }
