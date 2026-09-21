@@ -14,7 +14,8 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=20"
@@ -47,5 +48,24 @@
     "@anthropic-ai/sdk": {
       "optional": true
     }
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/miteshsharma/archcheck.git"
+  },
+  "homepage": "https://github.com/miteshsharma/archcheck#readme",
+  "bugs": {
+    "url": "https://github.com/miteshsharma/archcheck/issues"
+  },
+  "keywords": [
+    "architecture",
+    "dependency",
+    "layers",
+    "conformance",
+    "lint",
+    "typescript",
+    "sarif",
+    "fitness-function",
+    "agent"
+  ]
 }

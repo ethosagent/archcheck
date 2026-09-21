@@ -1,0 +1,72 @@
+# Publish to npm.
+#
+# DELIBERATELY MANUAL. There is no push or tag trigger, so nothing publishes until a maintainer
+# runs this workflow by hand and types the version. A release that can happen by accident is a
+# release that eventually does.
+#
+# It also refuses to publish a tree that is not green: every gate runs first, in the same order
+# `bun run check` runs them, and `npm publish` is the last step.
+name: publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'The version to publish. It must match package.json exactly.'
+        required: true
+        type: string
+      dry-run:
+        description: 'Pack and verify, but do not publish.'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: '1.3.13' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', registry-url: 'https://registry.npmjs.org' }
+
+      - run: bun install --frozen-lockfile
+
+      - name: the version must match package.json
+        run: |
+          declared=$(node -p "require('./package.json').version")
+          if [ "$declared" != "${{ inputs.version }}" ]; then
+            echo "package.json says $declared, the workflow was given ${{ inputs.version }}"
+            echo "bump package.json first, in its own reviewed commit"
+            exit 1
+          fi
+          echo "version $declared"
+
+      # Every gate, in the same order `bun run check` runs them.
+      - run: bash scripts/check-typecheck.sh
+      - run: bash scripts/check-lint.sh
+      - run: bash scripts/check-tests.sh
+      - run: bash scripts/check-emit.sh
+      - run: bash scripts/check-selfhost.sh
+      - run: bun run build
+
+      - name: the package must install clean in an empty project
+        run: |
+          npm pack --pack-destination /tmp
+          mkdir -p /tmp/consumer && cd /tmp/consumer
+          npm init -y >/dev/null
+          npm install --silent "/tmp/archcheck-${{ inputs.version }}.tgz" typescript
+          npx archcheck --version
+          npx archcheck --help | head -1
+
+      - name: publish
+        if: ${{ inputs.dry-run == false }}
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
