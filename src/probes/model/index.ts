@@ -97,13 +97,14 @@ export function createModelProbe(options: ModelProbeOptions = {}): Probe {
 
       const findings: RawFinding[] = [];
       let unjudged = 0;
-      let budgetReason: string | undefined;
+      /** Why the first file went unjudged — the Skip reason below is built from it. */
+      let unjudgedReason: string | undefined;
 
       for (const path of candidates) {
         const content = ctx.fs.read(path);
         if (content === undefined) continue;
 
-        const key = cacheKey(ruleSetHash, content);
+        const key = cacheKey(ruleSetHash, path, content);
         const cached = cache.get(key);
         if (cached) {
           findings.push(...toFindings(usableVerdicts(cached, known), path, byId));
@@ -113,7 +114,7 @@ export function createModelProbe(options: ModelProbeOptions = {}): Probe {
         // Checked BEFORE the request, never after. Over the ceiling the probe stops and says how
         // much went unjudged; it never silently spends more.
         if (!budget.canSpend()) {
-          budgetReason ??= budget.exhaustedReason();
+          unjudgedReason ??= budget.exhaustedReason();
           unjudged += 1;
           continue;
         }
@@ -124,13 +125,22 @@ export function createModelProbe(options: ModelProbeOptions = {}): Probe {
           rulesBlock,
           fileBlock: renderFileBlock(path, content),
         });
+        // An ISSUED call counts against the call cap whether or not it answered. Otherwise a
+        // rate-limited or 500-ing endpoint is hit once per candidate file. A call that did not
+        // answer costs nothing we can attribute, so it charges $0 — `model.test.ts`'s 'the call cap
+        // counts a call that FAILED' pins the count, 'stops before overspending' pins the spend.
+        budget.record(response.ok ? response.value.costUsd : 0);
         if (!response.ok) {
-          // One unreachable call does not fail a run, and does not pass one either.
+          // A call that did not answer — unreachable, refused, or unreadable (`readJudgeAnswer` in
+          // anthropic.ts) — leaves the file UNJUDGED, and out of the cache: `cache.set` is below
+          // this branch, so a non-answer is never persisted as "clean". One failed call does not
+          // fail the run; it also must not pass it, which is what `unjudgedReason` carries into the
+          // Skip below.
           unjudged += 1;
+          unjudgedReason ??= response.error.join('; ');
           continue;
         }
 
-        budget.record(response.value.costUsd);
         const usable = usableVerdicts(response.value.verdicts, known);
         cache.set(key, response.value.verdicts);
         findings.push(...toFindings(usable, path, byId));
@@ -138,8 +148,19 @@ export function createModelProbe(options: ModelProbeOptions = {}): Probe {
 
       cache.flush();
 
-      if (unjudged > 0 && findings.length === 0 && budgetReason !== undefined) {
-        return { skipped: true, reason: `${budgetReason}; ${unjudged} file(s) unjudged` };
+      // Nothing found and something unjudged is NOT a clean run, whatever stopped the judging.
+      // `src/archcheck.ts` records a Skip only when a probe returns one, so returning `[]` here
+      // would print "nothing to fix" and `{"ok":true,"skipped":[]}` for rules nobody evaluated —
+      // exactly the failure AGENTS.md §13 and §17 exist to prevent.
+      //
+      // ponytail: a run that found something AND left files unjudged reports only the findings.
+      // Ceiling: on that path the unjudged count is invisible, because `Probe.run` returns
+      // `RawFinding[] | Skip` (src/probes/types.ts) and cannot say both. Upgrade path: widen that
+      // seam to carry findings and skips together, and record both in `src/archcheck.ts`.
+      // Pinned by model.test.ts 'a partially judged run returns its findings'.
+      if (unjudged > 0 && findings.length === 0) {
+        const reason = unjudgedReason ?? 'the judge did not answer';
+        return { skipped: true, reason: `${reason}; ${unjudged} file(s) unjudged` };
       }
       return findings;
     },

@@ -1,10 +1,13 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMemoryFileSystem, createNodeFileSystem } from '../../fs/index.js';
 import type { ModuleGraph } from '../../graph/types.js';
 import { ok, type Result } from '../../result.js';
 import type { Rule } from '../../types.js';
 import type { RunCtx } from '../types.js';
+import { readJudgeAnswer } from './anthropic.js';
 import { createBudget } from './budget.js';
 import { cacheKey, hashRuleSet } from './cache.js';
 import { createModelProbe } from './index.js';
@@ -82,7 +85,7 @@ describe('skipping is a first-class outcome', () => {
     expect(await createModelProbe({ env: {} }).run(ctx({ rules: [] }))).toEqual([]);
   });
 
-  test('an unreachable judge does not fail the run', async () => {
+  test('an unreachable judge does not fail the run — it SKIPS it', async () => {
     const provider: LlmProvider = {
       name: 'broken',
       async judge() {
@@ -90,8 +93,27 @@ describe('skipping is a first-class outcome', () => {
       },
     };
     const result = await createModelProbe({ provider, cache: false, scope: 'all' }).run(ctx());
-    // Not a failure and not a pass: nothing found, nothing claimed.
-    expect(result).toEqual([]);
+    // Not a failure: no throw, no error Result. Not a pass either — every call failed, so the
+    // rules were never evaluated and the probe has to say so (AGENTS.md §17).
+    expect(result).toMatchObject({ skipped: true });
+    if (!('skipped' in result)) return;
+    expect(result.reason).toContain('ECONNREFUSED');
+    expect(result.reason).toContain('unjudged');
+  });
+
+  test('a partially judged run returns its findings — the unjudged count has no channel', async () => {
+    // Pinned as documented behaviour, not as a good outcome: `Probe.run` returns
+    // `RawFinding[] | Skip` (src/probes/types.ts), so a run that found something AND left files
+    // unjudged can only report the findings. See the note above the return in index.ts.
+    const provider = stubProvider(() => flags(RULE.id, 'if (amount > balance * 0.9)'));
+    const result = await createModelProbe({
+      provider,
+      cache: false,
+      scope: 'all',
+      budget: { maxUsd: 100, maxCalls: 1 },
+    }).run(ctx());
+    expect(Array.isArray(result)).toBe(true);
+    expect(Array.isArray(result) && result).toHaveLength(1);
   });
 });
 
@@ -198,6 +220,43 @@ describe('a verdict with no citation is discarded', () => {
   });
 });
 
+describe('a non-answer is not a clean bill of health', () => {
+  const said = (text: string) => ({ content: [{ type: 'text', text }], usage: {} });
+
+  test('a refusal is an error, not an empty verdict list', () => {
+    const answer = readJudgeAnswer({ content: [], usage: {}, stop_reason: 'refusal' });
+    expect(answer.ok).toBe(false);
+    if (answer.ok) return;
+    expect(answer.error.join(' ')).toContain('refused');
+  });
+
+  test('an answer that is not JSON is an error', () => {
+    expect(readJudgeAnswer(said('I cannot help with that.')).ok).toBe(false);
+  });
+
+  test('an answer with no verdicts array is an error', () => {
+    expect(readJudgeAnswer(said('{"notes":"none"}')).ok).toBe(false);
+  });
+
+  test('an answer whose every verdict is malformed is an error', () => {
+    expect(readJudgeAnswer(said('{"verdicts":[{"nope":true}]}')).ok).toBe(false);
+  });
+
+  test('"no violations" IS an answer', () => {
+    const answer = readJudgeAnswer(said('{"verdicts":[]}'));
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) return;
+    expect(answer.value.verdicts).toEqual([]);
+  });
+
+  test('a verdict the judge did answer is kept, junk beside it is dropped', () => {
+    const answer = readJudgeAnswer(said('{"verdicts":[{"ruleId":"a","violates":true},{"x":1}]}'));
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) return;
+    expect(answer.value.verdicts).toEqual([{ ruleId: 'a', violates: true }]);
+  });
+});
+
 describe('the budget', () => {
   test('stops before overspending, and reports how much went unjudged', async () => {
     const provider = stubProvider(() => ({ verdicts: [], costUsd: 0.4 }));
@@ -228,6 +287,26 @@ describe('the budget', () => {
     expect(provider.requests).toHaveLength(1);
   });
 
+  test('the call cap counts a call that FAILED — a broken endpoint is asked twice, not once per file', async () => {
+    let issued = 0;
+    const broken: LlmProvider = {
+      name: 'broken',
+      async judge() {
+        issued += 1;
+        return { ok: false, error: ['the judge could not be reached: ECONNREFUSED'] };
+      },
+    };
+    const result = await createModelProbe({
+      provider: broken,
+      cache: false,
+      scope: 'all',
+      budget: { maxUsd: 0.5, maxCalls: 2 },
+    }).run(ctx());
+    // Three candidate files, a cap of two: the third is never sent.
+    expect(issued).toBe(2);
+    expect(result).toMatchObject({ skipped: true });
+  });
+
   test('is checked BEFORE each request, never after', () => {
     const budget = createBudget({ maxUsd: 0.1, maxCalls: 10 });
     expect(budget.canSpend()).toBe(true);
@@ -248,9 +327,9 @@ describe('the budget', () => {
 
 describe('the cache', () => {
   test('keys on the RULE SET as well as the file', () => {
-    const fileOne = cacheKey(hashRuleSet(['a']), 'source');
-    const fileTwo = cacheKey(hashRuleSet(['a']), 'other source');
-    const ruleChanged = cacheKey(hashRuleSet(['a-changed']), 'source');
+    const fileOne = cacheKey(hashRuleSet(['a']), 'src/routes/x.ts', 'source');
+    const fileTwo = cacheKey(hashRuleSet(['a']), 'src/routes/x.ts', 'other source');
+    const ruleChanged = cacheKey(hashRuleSet(['a-changed']), 'src/routes/x.ts', 'source');
     expect(fileOne).not.toBe(fileTwo);
     // A changed rule must not serve a verdict produced under the old one.
     expect(fileOne).not.toBe(ruleChanged);
@@ -258,6 +337,66 @@ describe('the cache', () => {
 
   test('hashRuleSet is order-independent', () => {
     expect(hashRuleSet(['a', 'b'])).toBe(hashRuleSet(['b', 'a']));
+  });
+
+  test('keys on the PATH too, because the path is in the prompt', () => {
+    const hash = hashRuleSet(['a']);
+    // renderFileBlock puts the path in the prompt, so the judge's answer depends on it.
+    expect(cacheKey(hash, 'src/routes/fresh.ts', 'same')).not.toBe(
+      cacheKey(hash, 'src/routes/legacy.ts', 'same'),
+    );
+  });
+
+  test('two files with identical content do not share a verdict', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'archcheck-model-'));
+    try {
+      const body = 'if (a > b) return "no";\n';
+      const probeCtx = ctx({
+        root,
+        fs: createMemoryFileSystem({ 'src/routes/fresh.ts': body, 'src/routes/legacy.ts': body }),
+      });
+
+      const cold = stubProvider((request) =>
+        request.fileBlock.includes('legacy.ts')
+          ? flags(RULE.id, 'the legacy span')
+          : { verdicts: [] },
+      );
+      const first = await createModelProbe({ provider: cold, scope: 'all' }).run(probeCtx);
+      expect(cold.requests).toHaveLength(2);
+      expect(Array.isArray(first) && first.map((f) => f.file)).toEqual(['src/routes/legacy.ts']);
+
+      // Warm: both verdicts come from the cache, and each has to come back to its own file.
+      const warm = stubProvider(() => ({ verdicts: [] }));
+      const second = await createModelProbe({ provider: warm, scope: 'all' }).run(probeCtx);
+      expect(warm.requests).toHaveLength(0);
+      expect(Array.isArray(second) && second.map((f) => f.file)).toEqual(['src/routes/legacy.ts']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a non-answer is not cached — the next run asks again', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'archcheck-model-'));
+    try {
+      const probeCtx = ctx({
+        root,
+        fs: createMemoryFileSystem({ 'src/routes/x.ts': 'if (a > b) return "no";\n' }),
+      });
+      const broken: LlmProvider = {
+        name: 'broken',
+        async judge() {
+          return { ok: false, error: ['the judge refused to answer'] };
+        },
+      };
+      await createModelProbe({ provider: broken, scope: 'all' }).run(probeCtx);
+
+      const second = stubProvider(() => flags(RULE.id, 'if (a > b)'));
+      const result = await createModelProbe({ provider: second, scope: 'all' }).run(probeCtx);
+      expect(second.requests).toHaveLength(1);
+      expect(Array.isArray(result) && result).toHaveLength(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('an unchanged file on a second run makes no call', async () => {
