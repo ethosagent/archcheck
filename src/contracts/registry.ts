@@ -10,9 +10,11 @@
 import { ok, type Result } from '../result.js';
 import type { ContractKind, Rule } from '../types.js';
 import { bannedSyntaxContract } from './banned-syntax.js';
+import { declaredFieldContract } from './declared-field.js';
 import { encapsulationContract } from './encapsulation.js';
 import { layersContract } from './layers.js';
 import { namingContract } from './naming.js';
+import { requiredFileContract } from './required-file.js';
 import type { ContractType, ValidateCtx } from './types.js';
 
 const IMPLEMENTED: readonly ContractType[] = [
@@ -20,6 +22,8 @@ const IMPLEMENTED: readonly ContractType[] = [
   encapsulationContract,
   namingContract,
   bannedSyntaxContract,
+  requiredFileContract,
+  declaredFieldContract,
 ];
 
 const byKind = new Map<ContractKind, ContractType>(IMPLEMENTED.map((c) => [c.kind, c]));

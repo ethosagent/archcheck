@@ -9,6 +9,14 @@ export {
   findBannedOccurrences,
 } from './banned-syntax.js';
 export {
+  asDeclaredFieldParams,
+  type DeclaredFieldParams,
+  declaredFieldApplies,
+  declaredFieldContract,
+  findMissingDeclarations,
+  type MissingDeclaration,
+} from './declared-field.js';
+export {
   asEncapsulationParams,
   type EncapsulationParams,
   type EncapsulationVerdict,
@@ -37,4 +45,12 @@ export {
   namingContract,
 } from './naming.js';
 export { contractFor, implementedKinds, validateParamsByKind } from './registry.js';
+export {
+  asRequiredFileParams,
+  isRuleSelector,
+  type RequiredFileParams,
+  type RequiredSubject,
+  requiredFileContract,
+  subjectsFor,
+} from './required-file.js';
 export type { ContractType, EmitCtx, ExplainCtx, Refinement, ValidateCtx } from './types.js';
