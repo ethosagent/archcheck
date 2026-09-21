@@ -2,16 +2,15 @@
 # archcheck checks archcheck.
 #
 # If it cannot hold its own dependency law it has no business holding anyone else's.
-# Skip-when-absent, fail-when-present: stubbed until plan 13 lands the manifest.
+# Live since plan 13. archcheck's own architecture.config.ts is the subject.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if [ ! -f architecture.config.ts ]; then
-  if [ "${CI:-}" = "true" ] && [ -f src/archcheck.ts ]; then
-    echo "the facade exists but archcheck has no manifest of its own — self-host is not optional"
-    exit 1
-  fi
-  echo "SKIP no architecture.config.ts yet (plan 13)"; exit 0
+  echo "archcheck has no manifest of its own — self-host is not optional"
+  exit 1
 fi
 
-bun run src/cli/index.ts --only deterministic
+# Every tier, not --only deterministic: the proxy tier is where this repo's own weakest checks
+# live, and a gate that skips them is not evidence about them.
+bun run src/cli/index.ts --no-color

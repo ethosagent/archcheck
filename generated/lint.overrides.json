@@ -1,0 +1,470 @@
+{
+  "$generated": {
+    "by": "archcheck",
+    "doNotEdit": true,
+    "regenerate": "npx archcheck emit",
+    "rules": [
+      "cli-owns-no-behaviour",
+      "contracts-know-no-probe",
+      "emit-reads-contracts-not-probes",
+      "filenames-are-camel-case-or-kebab",
+      "graph-reports-facts-only",
+      "kernel-imports-nothing",
+      "no-computed-dynamic-import",
+      "no-console-outside-an-entry-point",
+      "no-empty-catch",
+      "no-inline-suppression",
+      "normalize-adds-only",
+      "only-the-facade-wires-layers",
+      "probes-never-report",
+      "registry-knows-only-rules",
+      "reporters-read-a-runresult",
+      "the-manifest-reaches-the-barrel-only",
+      "util-is-a-leaf"
+    ],
+    "source": "architecture.config.ts"
+  },
+  "rules": [
+    {
+      "files": [
+        "src/cli/**"
+      ],
+      "forbid": "import-path-matching",
+      "forbiddenLayers": [
+        "contract",
+        "graph",
+        "manifest",
+        "normalize",
+        "probe",
+        "registry",
+        "test"
+      ],
+      "message": "the CLI parses arguments, calls the facade and picks a reporter — nothing else — add the capability to ArchCheck instead: the agent hook does not shell out",
+      "patterns": [
+        "architecture.config.ts",
+        "src/**/*.test.ts",
+        "src/contracts/**",
+        "src/graph/**",
+        "src/normalize/**",
+        "src/probes/**",
+        "src/registry/**",
+        "tests/**"
+      ],
+      "ruleId": "cli-owns-no-behaviour"
+    },
+    {
+      "files": [
+        "src/contracts/**"
+      ],
+      "forbid": "import-path-matching",
+      "forbiddenLayers": [
+        "cli",
+        "emit",
+        "facade",
+        "manifest",
+        "normalize",
+        "probe",
+        "registry",
+        "report",
+        "test"
+      ],
+      "message": "a contract kind decides, emits and explains — it never runs anything — return the decision as data and let a probe do the walking",
+      "patterns": [
+        "architecture.config.ts",
+        "src/**/*.test.ts",
+        "src/archcheck.ts",
+        "src/cli/**",
+        "src/emit/**",
+        "src/index.ts",
+        "src/normalize/**",
+        "src/probes/**",
+        "src/registry/**",
+        "src/report/**",
+        "tests/**"
+      ],
+      "ruleId": "contracts-know-no-probe"
+    },
+    {
+      "files": [
+        "src/emit/**"
+      ],
+      "forbid": "import-path-matching",
+      "forbiddenLayers": [
+        "cli",
+        "facade",
+        "graph",
+        "manifest",
+        "normalize",
+        "probe",
+        "report",
+        "test"
+      ],
+      "message": "the emitter asks a contract kind for fragments and never runs a probe — emit is a pure function of the manifest; move the runtime part to a probe",
+      "patterns": [
+        "architecture.config.ts",
+        "src/**/*.test.ts",
+        "src/archcheck.ts",
+        "src/cli/**",
+        "src/graph/**",
+        "src/index.ts",
+        "src/normalize/**",
+        "src/probes/**",
+        "src/report/**",
+        "tests/**"
+      ],
+      "ruleId": "emit-reads-contracts-not-probes"
+    },
+    {
+      "autofix": false,
+      "files": [
+        "src/**"
+      ],
+      "forbid": "name-not-matching",
+      "message": "a filename is camelCase, or kebab-case when it names a contract kind — rename the file",
+      "pattern": "^[a-z][A-Za-z0-9]*(-[a-z0-9]+)*(\\.test)?\\.ts$",
+      "ruleId": "filenames-are-camel-case-or-kebab",
+      "target": "files"
+    },
+    {
+      "files": [
+        "src/graph/**"
+      ],
+      "forbid": "import-path-matching",
+      "forbiddenLayers": [
+        "cli",
+        "contract",
+        "emit",
+        "facade",
+        "manifest",
+        "normalize",
+        "probe",
+        "registry",
+        "report",
+        "test"
+      ],
+      "message": "the graph reader reports facts and evaluates no rule — move the judgement into a contract kind; the graph only observes",
+      "patterns": [
+        "architecture.config.ts",
+        "src/**/*.test.ts",
+        "src/archcheck.ts",
+        "src/cli/**",
+        "src/contracts/**",
+        "src/emit/**",
+        "src/index.ts",
+        "src/normalize/**",
+        "src/probes/**",
+        "src/registry/**",
+        "src/report/**",
+        "tests/**"
+      ],
+      "ruleId": "graph-reports-facts-only"
+    },
+    {
+      "files": [
+        "src/types.ts",
+        "src/result.ts",
+        "src/version.ts"
+      ],
+      "forbid": "import-path-matching",
+      "forbiddenLayers": [
+        "cli",
+        "contract",
+        "emit",
+        "facade",
+        "graph",
+        "manifest",
+        "normalize",
+        "probe",
+        "registry",
+        "report",
+        "test",
+        "util"
+      ],
+      "message": "the kernel imports nothing internal — not a layer, and not the TypeScript SDK — if the kernel needs it, it is not the kernel: move the type down or the code up",
+      "patterns": [
+        "architecture.config.ts",
+        "src/**/*.test.ts",
+        "src/archcheck.ts",
+        "src/cli/**",
+        "src/contracts/**",
+        "src/emit/**",
+        "src/graph/**",
+        "src/index.ts",
+        "src/normalize/**",
+        "src/probes/**",
+        "src/registry/**",
+        "src/report/**",
+        "src/util/**",
+        "tests/**"
+      ],
+      "ruleId": "kernel-imports-nothing"
+    },
+    {
+      "autofix": false,
+      "files": [
+        "src/**"
+      ],
+      "forbid": "computed-dynamic-import",
+      "message": "a dynamic import names its module literally, so the graph stays complete — import the candidates statically and pick between them",
+      "ruleId": "no-computed-dynamic-import"
+    },
+    {
+      "autofix": false,
+      "files": [
+        "src/**",
+        "!src/cli/**",
+        "!src/report/**",
+        "!src/**/*.test.ts"
+      ],
+      "forbid": "member-access",
+      "message": "logging goes through one seam, so the server stays embeddable — return the text and let the CLI print it",
+      "ruleId": "no-console-outside-an-entry-point",
+      "target": "console"
+    },
+    {
+      "autofix": false,
+      "files": [
+        "src/**",
+        "!src/**/*.test.ts"
+      ],
+      "forbid": "empty-catch",
+      "message": "a caught error is handled, rethrown, or its silence is explained — handle it, rethrow it, or leave a comment saying why ignoring is safe",
+      "ruleId": "no-empty-catch"
+    },
+    {
+      "autofix": false,
+      "files": [
+        "src/**",
+        "!src/**/*.test.ts"
+      ],
+      "forbid": "suppression-comment",
+      "message": "an exception lives in the manifest with an owner and an expiry, never inline — declare an exception in architecture.config.ts, with an owner and an expiry",
+      "ruleId": "no-inline-suppression"
+    },
+    {
+      "files": [
+        "src/normalize/**"
+      ],
+      "forbid": "import-path-matching",
+      "forbiddenLayers": [
+        "cli",
+        "contract",
+        "emit",
+        "facade",
+        "graph",
+        "manifest",
+        "probe",
+        "registry",
+        "report",
+        "test"
+      ],
+      "message": "the normaliser enriches a finding and runs no check of its own — inject it, the way refine is injected, rather than importing a kind",
+      "patterns": [
+        "architecture.config.ts",
+        "src/**/*.test.ts",
+        "src/archcheck.ts",
+        "src/cli/**",
+        "src/contracts/**",
+        "src/emit/**",
+        "src/graph/**",
+        "src/index.ts",
+        "src/probes/**",
+        "src/registry/**",
+        "src/report/**",
+        "tests/**"
+      ],
+      "ruleId": "normalize-adds-only"
+    },
+    {
+      "files": [
+        "src/archcheck.ts",
+        "src/index.ts"
+      ],
+      "forbid": "import-path-matching",
+      "forbiddenLayers": [
+        "cli",
+        "manifest",
+        "test"
+      ],
+      "message": "the facade is the one place the layers are wired together — wire it in src/archcheck.ts — that is the composition root, and the only one",
+      "patterns": [
+        "architecture.config.ts",
+        "src/**/*.test.ts",
+        "src/cli/**",
+        "tests/**"
+      ],
+      "ruleId": "only-the-facade-wires-layers"
+    },
+    {
+      "files": [
+        "src/probes/**"
+      ],
+      "forbid": "import-path-matching",
+      "forbiddenLayers": [
+        "cli",
+        "emit",
+        "facade",
+        "manifest",
+        "normalize",
+        "registry",
+        "report",
+        "test"
+      ],
+      "message": "a probe returns evidence, never prose and never a verdict — return a RawFinding and let the kind's explain() write the sentence",
+      "patterns": [
+        "architecture.config.ts",
+        "src/**/*.test.ts",
+        "src/archcheck.ts",
+        "src/cli/**",
+        "src/emit/**",
+        "src/index.ts",
+        "src/normalize/**",
+        "src/registry/**",
+        "src/report/**",
+        "tests/**"
+      ],
+      "ruleId": "probes-never-report"
+    },
+    {
+      "files": [
+        "src/registry/**"
+      ],
+      "forbid": "import-path-matching",
+      "forbiddenLayers": [
+        "cli",
+        "contract",
+        "emit",
+        "facade",
+        "graph",
+        "manifest",
+        "normalize",
+        "probe",
+        "report",
+        "test"
+      ],
+      "message": "the registry knows that a rule has a kind, never what a kind means — inject the kind-specific behaviour as a parameter, the way validateParams is",
+      "patterns": [
+        "architecture.config.ts",
+        "src/**/*.test.ts",
+        "src/archcheck.ts",
+        "src/cli/**",
+        "src/contracts/**",
+        "src/emit/**",
+        "src/graph/**",
+        "src/index.ts",
+        "src/normalize/**",
+        "src/probes/**",
+        "src/report/**",
+        "tests/**"
+      ],
+      "ruleId": "registry-knows-only-rules"
+    },
+    {
+      "files": [
+        "src/report/**"
+      ],
+      "forbid": "import-path-matching",
+      "forbiddenLayers": [
+        "cli",
+        "contract",
+        "emit",
+        "facade",
+        "graph",
+        "manifest",
+        "normalize",
+        "probe",
+        "registry",
+        "test"
+      ],
+      "message": "a reporter reads a RunResult and reaches for nothing else — put what the reporter needs into the Diagnostic, so every audience gets it",
+      "patterns": [
+        "architecture.config.ts",
+        "src/**/*.test.ts",
+        "src/archcheck.ts",
+        "src/cli/**",
+        "src/contracts/**",
+        "src/emit/**",
+        "src/graph/**",
+        "src/index.ts",
+        "src/normalize/**",
+        "src/probes/**",
+        "src/registry/**",
+        "tests/**"
+      ],
+      "ruleId": "reporters-read-a-runresult"
+    },
+    {
+      "files": [
+        "architecture.config.ts"
+      ],
+      "forbid": "import-path-matching",
+      "forbiddenLayers": [
+        "cli",
+        "contract",
+        "emit",
+        "graph",
+        "kernel",
+        "normalize",
+        "probe",
+        "registry",
+        "report",
+        "test",
+        "util"
+      ],
+      "message": "the manifest imports archcheck through its public surface, like any consumer — import from './src/index.js' — reaching inside would make the manifest a consumer no other repo could be",
+      "patterns": [
+        "src/**/*.test.ts",
+        "src/cli/**",
+        "src/contracts/**",
+        "src/emit/**",
+        "src/graph/**",
+        "src/normalize/**",
+        "src/probes/**",
+        "src/registry/**",
+        "src/report/**",
+        "src/result.ts",
+        "src/types.ts",
+        "src/util/**",
+        "src/version.ts",
+        "tests/**"
+      ],
+      "ruleId": "the-manifest-reaches-the-barrel-only"
+    },
+    {
+      "files": [
+        "src/util/**"
+      ],
+      "forbid": "import-path-matching",
+      "forbiddenLayers": [
+        "cli",
+        "contract",
+        "emit",
+        "facade",
+        "graph",
+        "manifest",
+        "normalize",
+        "probe",
+        "registry",
+        "report",
+        "test"
+      ],
+      "message": "a utility reaches the kernel and nothing else — take what you need as an argument instead of importing it",
+      "patterns": [
+        "architecture.config.ts",
+        "src/**/*.test.ts",
+        "src/archcheck.ts",
+        "src/cli/**",
+        "src/contracts/**",
+        "src/emit/**",
+        "src/graph/**",
+        "src/index.ts",
+        "src/normalize/**",
+        "src/probes/**",
+        "src/registry/**",
+        "src/report/**",
+        "tests/**"
+      ],
+      "ruleId": "util-is-a-leaf"
+    }
+  ]
+}
