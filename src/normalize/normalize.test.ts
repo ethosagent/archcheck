@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createNodeFileSystem } from '../fs/index.js';
 import { readGraph } from '../graph/index.js';
 import { createGraphProbe } from '../probes/graph.js';
 import type { RawFinding, Rule } from '../types.js';
@@ -117,6 +118,8 @@ describe('identity stability against a real file edit', () => {
         root: work,
         tsconfigPath: join(work, 'tsconfig.json'),
         rules,
+        fs: createNodeFileSystem(work),
+        configPath: 'architecture.config.ts',
         graph: () =>
           readGraph({ root: work, tsconfigPath: join(work, 'tsconfig.json'), cache: false }),
       };

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { createNodeFileSystem } from '../fs/index.js';
 import { readGraph } from '../graph/index.js';
 import type { ModuleGraph } from '../graph/types.js';
 import type { Result } from '../result.js';
@@ -56,7 +57,15 @@ const RULES: Rule[] = [
 ];
 
 function ctx(overrides: Partial<RunCtx> = {}): RunCtx {
-  return { root: ROOT, tsconfigPath: TSCONFIG, rules: RULES, graph: sharedGraph, ...overrides };
+  return {
+    root: ROOT,
+    tsconfigPath: TSCONFIG,
+    rules: RULES,
+    fs: createNodeFileSystem(ROOT),
+    configPath: 'architecture.config.ts',
+    graph: sharedGraph,
+    ...overrides,
+  };
 }
 
 const probe = createLintProbe();

@@ -10,6 +10,7 @@
  * probe — a probe that builds its own graph has broken the property the whole design rests on.
  */
 
+import type { FileSystem } from '../fs/index.js';
 import type { ModuleGraph } from '../graph/types.js';
 import type { Result } from '../result.js';
 import type { ContractKind, RawFinding, Rule } from '../types.js';
@@ -33,6 +34,10 @@ export type RunCtx = {
   changed?: readonly string[];
   /** The shared module graph, built at most once per run. */
   graph(): Result<ModuleGraph>;
+  /** Every filesystem read goes through here, so a probe can be run with no disk at all. */
+  fs: FileSystem;
+  /** Repo-relative path of the manifest — where a registry-level finding is reported against. */
+  configPath: string;
 };
 
 export type Probe = {

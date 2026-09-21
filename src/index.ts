@@ -37,6 +37,11 @@ export {
   todayIso,
   validateExceptions,
 } from './exceptions/index.js';
+export {
+  createMemoryFileSystem,
+  createNodeFileSystem,
+  type FileSystem,
+} from './fs/index.js';
 export { type ArchitectureManifest, defineArchitecture } from './registry/define.js';
 export type { Registry } from './registry/index.js';
 export {

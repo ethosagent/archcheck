@@ -30,16 +30,19 @@ import {
 } from './emit/index.js';
 import type { StaleFile } from './emit/write.js';
 import { applyExceptions, todayIso } from './exceptions/index.js';
+import { createNodeFileSystem } from './fs/index.js';
 import { readGraph } from './graph/index.js';
 import type { ModuleGraph } from './graph/types.js';
 import { type NormalizeInput, normalize } from './normalize/index.js';
 import { createGraphProbe, GRAPH_REPORT_PATH, toGraphReport } from './probes/graph.js';
 import { createLintProbe } from './probes/lint.js';
+import { createStructureProbe } from './probes/structure.js';
 import { isSkip, type Probe, type RunCtx } from './probes/types.js';
 import { nextIdLedger } from './registry/ids.js';
 import { open, type Registry } from './registry/index.js';
 import { err, ok, type Result } from './result.js';
 import type { Confidence, Coverage, Diagnostic, RunResult, SkipRecord } from './types.js';
+import { repoRelative } from './util/paths.js';
 
 /** Exit codes are an API. An agent branches on them, so they are frozen from v0.1 (LLD §6). */
 export const EXIT = {
@@ -105,7 +108,7 @@ export type LoadOptions = {
 const TIER_RANK: Record<Confidence, number> = { deterministic: 0, proxy: 1, model: 2 };
 
 function probes(): Probe[] {
-  return [createGraphProbe(), createLintProbe()];
+  return [createGraphProbe(), createLintProbe(), createStructureProbe()];
 }
 
 export function load(options: LoadOptions = {}): Result<ArchCheck> {
@@ -148,6 +151,8 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
       const ctx: RunCtx = {
         root: registry.root,
         tsconfigPath,
+        fs: createNodeFileSystem(registry.root),
+        configPath: repoRelative(registry.root, registry.configPath),
         rules,
         ...(checkOptions.changed === undefined ? {} : { changed: checkOptions.changed }),
         graph: () => {
