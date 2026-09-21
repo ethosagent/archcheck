@@ -169,3 +169,22 @@ describe('archcheck init, on the example', () => {
     });
   });
 });
+
+describe('init never degrades silently', () => {
+  test('a module graph it cannot read is reported, and exits 2', () => {
+    inCopy((root) => {
+      rmSync(join(root, 'architecture.config.ts'));
+      rmSync(join(root, 'fixtures'), { recursive: true, force: true });
+      // No tsconfig means no graph. init can still name the layers, but every mayImport list is
+      // then empty — a manifest that describes nothing while looking like one that does.
+      rmSync(join(root, 'tsconfig.json'));
+
+      const { code, stdout, stderr } = archcheck(['init'], root);
+      expect(code).toBe(2);
+      expect(stdout).toContain('inferred 6 layer(s)');
+      expect(stderr).toContain('could not read your module graph');
+      expect(stderr).toContain('mayImport list is EMPTY');
+      expect(stderr).toContain('--force');
+    });
+  });
+});

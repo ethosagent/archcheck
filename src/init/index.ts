@@ -89,8 +89,6 @@ function layerOfPath(layers: readonly CandidateLayer[], relative: string): strin
   return best?.name;
 }
 
-export type InitPlan = { source: string; layerCount: number; observedEdges: number };
-
 export function renderManifest(
   layers: readonly CandidateLayer[],
   mayImport: ReadonlyMap<string, readonly string[]>,
@@ -189,7 +187,20 @@ export function renderManifest(
   ].join('\n');
 }
 
-export function buildInitManifest(root: string, tsconfigPath: string): Result<string> {
+export type InitResult = {
+  manifest: string;
+  layers: readonly CandidateLayer[];
+  /**
+   * Whether the module graph could be read. When it could not, every `mayImport` is empty and the
+   * manifest describes nothing — the caller MUST say so. An init that quietly produces an empty
+   * allow-list looks like a working manifest and is not one.
+   */
+  observed: boolean;
+  /** Why the graph could not be read. Present only when `observed` is false. */
+  notObservedBecause?: string[];
+};
+
+export function buildInitManifest(root: string, tsconfigPath: string): Result<InitResult> {
   const layers = inferLayers(root);
   if (layers.length === 0) {
     return err([
@@ -201,8 +212,8 @@ export function buildInitManifest(root: string, tsconfigPath: string): Result<st
   const mayImport = new Map<string, Set<string>>();
   for (const layer of layers) mayImport.set(layer.name, new Set());
 
-  // The graph is optional here on purpose: without a tsconfig we can still name the layers, and a
-  // manifest with empty allow-lists at `warn` is a usable starting point that says what it is.
+  // The graph is optional here on purpose: without a tsconfig we can still name the layers. But
+  // "optional" must never mean "silent" — the caller is told, and says so.
   const graph = readGraph({ root, tsconfigPath, cache: false });
   if (graph.ok) {
     for (const edge of graph.value.edges) {
@@ -217,7 +228,12 @@ export function buildInitManifest(root: string, tsconfigPath: string): Result<st
   const frozen = new Map<string, readonly string[]>(
     [...mayImport.entries()].map(([name, set]) => [name, [...set]]),
   );
-  return ok(renderManifest(layers, frozen));
+  return ok({
+    manifest: renderManifest(layers, frozen),
+    layers,
+    observed: graph.ok,
+    ...(graph.ok ? {} : { notObservedBecause: graph.error }),
+  });
 }
 
 export function initSummary(root: string, layers: readonly CandidateLayer[]): string[] {

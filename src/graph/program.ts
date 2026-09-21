@@ -11,6 +11,7 @@
 import { dirname } from 'node:path';
 import ts from 'typescript';
 import { err, ok, type Result } from '../result.js';
+import { missingCompilerApi } from '../util/compilerApi.js';
 import { toPosix } from '../util/paths.js';
 
 export type BuiltProgram = {
@@ -31,6 +32,11 @@ function fingerprint(options: ts.CompilerOptions, fileCount: number): string {
 }
 
 export function buildProgram(tsconfigPath: string): Result<BuiltProgram> {
+  // Before anything touches `ts.sys`. Without this the failure is
+  // "Cannot read properties of undefined (reading 'readFile')", which names nothing.
+  const unusable = missingCompilerApi(ts);
+  if (unusable) return err(unusable);
+
   const read = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
   if (read.error) {
     return err([

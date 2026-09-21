@@ -21,6 +21,7 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import ts from 'typescript';
 import { err, ok, type Result } from '../result.js';
+import { missingCompilerApi } from '../util/compilerApi.js';
 import { type ArchitectureManifest, defineArchitecture } from './define.js';
 
 export const CONFIG_FILENAME = 'architecture.config.ts';
@@ -56,6 +57,9 @@ export type LoadedManifest = {
 };
 
 export function loadManifestFrom(configPath: string): Result<LoadedManifest> {
+  const unusable = missingCompilerApi(ts);
+  if (unusable) return err(unusable);
+
   let source: string;
   try {
     source = readFileSync(configPath, 'utf8');

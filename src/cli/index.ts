@@ -16,7 +16,6 @@ import {
   EXIT,
   type ExitCode,
   exitCodeFor,
-  inferLayers,
   initSummary,
   load,
 } from '../archcheck.js';
@@ -104,9 +103,23 @@ function runInit(args: ParsedArgs, cwd: string): ExitCode {
   const built = buildInitManifest(cwd, join(cwd, 'tsconfig.json'));
   if (!built.ok) return fail(built.error, EXIT.config);
 
-  writeFileSync(configPath, built.value);
-  for (const line of initSummary(cwd, inferLayers(cwd))) console.log(line);
+  writeFileSync(configPath, built.value.manifest);
+  for (const line of initSummary(cwd, built.value.layers)) console.log(line);
   console.log('');
+
+  if (!built.value.observed) {
+    // Never silent. Without the graph every allow-list is empty, so the manifest names the layers
+    // and describes nothing about how they depend on each other.
+    for (const line of built.value.notObservedBecause ?? []) console.error(`warning: ${line}`);
+    console.error('');
+    console.error(
+      `wrote ${CONFIG_FILENAME}, but archcheck could not read your module graph, so every ` +
+        'mayImport list is EMPTY.',
+    );
+    console.error('  → fix the problem above, delete the file, and run `archcheck init --force`');
+    return EXIT.config;
+  }
+
   console.log(`wrote ${CONFIG_FILENAME} — every rule is 'warn', so the first run is green`);
   console.log('  next: npx archcheck          see what it observes');
   console.log('        npx archcheck emit     write the generated configs');

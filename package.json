@@ -21,7 +21,7 @@
     "node": ">=20"
   },
   "peerDependencies": {
-    "typescript": ">=5.4",
+    "typescript": ">=5.4 <7",
     "@anthropic-ai/sdk": ">=0.70.0"
   },
   "devDependencies": {
