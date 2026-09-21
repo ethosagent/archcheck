@@ -101,6 +101,16 @@ describe('the expiry boundary', () => {
     expect(applyExceptions([exception()], [], '2026-12-01').statuses[0]?.daysLeft).toBe(30);
     expect(applyExceptions([exception()], [], '2027-01-10').statuses[0]?.daysLeft).toBe(-10);
   });
+
+  test('suppression and expiry are one mechanism, so they never disagree', () => {
+    // Suppression once compared the strings while expiry parsed the dates, and a February 30th
+    // made the two answer differently. One decision function now feeds both.
+    for (const today of ['2026-12-30', '2026-12-31', '2027-01-01', '2027-03-01']) {
+      const applied = applyExceptions([exception()], [diagnostic()], today);
+      expect(applied.diagnostics[0]?.exempted).toBe(!applied.statuses[0]?.expired);
+      expect(Number.isNaN(applied.statuses[0]?.daysLeft)).toBe(false);
+    }
+  });
 });
 
 describe('always visible', () => {
@@ -134,6 +144,21 @@ describe('validation', () => {
   test('rejects a missing or malformed expiry', () => {
     expect(check({ expires: '' }).ok).toBe(false);
     expect(check({ expires: 'next year' }).ok).toBe(false);
+  });
+
+  test('rejects an expiry that is regex-shaped but not a real calendar date', () => {
+    // `9999-99-99` passes the shape check, so it used to suppress forever and report NaN days
+    // left. A calendar-invalid date is a manifest error — exit 2.
+    for (const expires of ['9999-99-99', '2030-02-30', '2026-02-29', '2026-13-01', '2026-04-00']) {
+      const result = check({ expires });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error[0]).toContain('not a real calendar date');
+    }
+  });
+
+  test('accepts a real leap day', () => {
+    expect(check({ expires: '2028-02-29' }).ok).toBe(true);
   });
 
   test('rejects a missing reason — the next reader has to be able to judge it', () => {

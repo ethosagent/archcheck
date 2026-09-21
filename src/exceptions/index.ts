@@ -33,10 +33,22 @@ export type ArchitectureException = {
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DAY_MS = 86_400_000;
 
+/**
+ * A REAL calendar date, not merely a regex-shaped one. `9999-99-99` and `2030-02-30` pass the shape
+ * check, and an unreal date is the one way an exception never expires. The round trip catches both
+ * kinds of engine: one that refuses the out-of-range day, and one that rolls it over to a different
+ * date. Pinned by 'rejects an expiry that is regex-shaped but not a real calendar date'.
+ */
+function isCalendarDate(value: string): boolean {
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
 export function todayIso(now: Date = new Date()): string {
   return now.toISOString().slice(0, 10);
 }
 
+/** Both dates are real calendar dates — `validateExceptions` refuses anything else. */
 function daysBetween(fromIso: string, toIso: string): number {
   return Math.round((Date.parse(toIso) - Date.parse(fromIso)) / DAY_MS);
 }
@@ -59,6 +71,10 @@ export function validateExceptions(
     if (typeof exception?.expires !== 'string' || !ISO_DATE.test(exception.expires)) {
       errors.push(
         `${where}: expires is required and must be YYYY-MM-DD — an allowance with no end is a rule quietly deleted`,
+      );
+    } else if (!isCalendarDate(exception.expires)) {
+      errors.push(
+        `${where}: expires '${exception.expires}' is not a real calendar date — a date that never arrives is an allowance that never expires`,
       );
     }
     if (typeof exception?.reason !== 'string' || exception.reason.trim().length === 0) {
@@ -98,10 +114,19 @@ export function applyExceptions(
   diagnostics: readonly Diagnostic[],
   today: string = todayIso(),
 ): AppliedExceptions {
+  // ONE mechanism for both halves. Suppression used to compare the ISO strings while expiry parsed
+  // them, so `expires: '9999-99-99'` suppressed forever and reported NaN days left — property 1 of
+  // this module, silently untrue. Both now ask this predicate, so they cannot disagree. Written as
+  // `!(… >= 0)` so an unparseable date reads as EXPIRED rather than as a permanent allowance; only
+  // a caller bypassing `validateExceptions` can produce one. Pinned by 'suppression and expiry are
+  // one mechanism, so they never disagree'.
+  const isExpired = (exception: ArchitectureException): boolean =>
+    !(daysBetween(today, exception.expires) >= 0);
+
   const counts = new Map<number, number>();
   const marked = diagnostics.map((diagnostic) => {
     const index = exceptions.findIndex(
-      (exception) => exception.expires >= today && covers(exception, diagnostic),
+      (exception) => !isExpired(exception) && covers(exception, diagnostic),
     );
     if (index === -1) return diagnostic;
     counts.set(index, (counts.get(index) ?? 0) + 1);
@@ -115,7 +140,7 @@ export function applyExceptions(
       owner: exception.owner,
       expires: exception.expires,
       // The expiry date itself is the last day it holds, so "expired" means strictly past it.
-      expired: daysLeft < 0,
+      expired: isExpired(exception),
       daysLeft,
       reason: exception.reason,
       suppressed: counts.get(index) ?? 0,
