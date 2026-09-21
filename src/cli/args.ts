@@ -33,6 +33,7 @@ const FORMATS: Record<string, ReporterName> = {
   terminal: 'terminal',
   json: 'json',
   'json-pretty': 'json-pretty',
+  sarif: 'sarif',
   verdict: 'verdict',
 };
 
@@ -47,6 +48,7 @@ export const HELP = `archcheck — architecture conformance, declared once and c
   archcheck                      run every rule, terminal output
   archcheck --changed            diff-scoped · the pre-commit path
   archcheck --format json        the agent format
+  archcheck --format sarif       SARIF 2.1.0, for CI code scanning and editors
   archcheck --format verdict     one blocking answer, for a hook
   archcheck --only deterministic skip the proxy and model tiers
   archcheck --show-baselined     include findings the baseline records

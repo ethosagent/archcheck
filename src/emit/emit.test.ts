@@ -41,6 +41,7 @@ function plan(root: string, rules: readonly Rule[] = RULES) {
     root,
     configPath: join(root, 'architecture.config.ts'),
     rules,
+    coverage: { total: rules.length, deterministic: rules.length, proxy: 0, model: 0 },
     contractFor,
   });
 }
@@ -57,7 +58,11 @@ describe('planning', () => {
   test('writes one file per sink, and only for sinks that had fragments', () => {
     inTempRepo((root) => {
       const files = plan(root).files;
-      expect(files.map((f) => f.path)).toEqual(['graph.config.cjs', 'lint.overrides.json']);
+      expect(files.map((f) => f.path)).toEqual([
+        'graph.config.cjs',
+        'lint.overrides.json',
+        'rules.json',
+      ]);
     });
   });
 
@@ -142,7 +147,7 @@ describe('emit --check', () => {
   test('reports every sink as missing before the first emit', () => {
     inTempRepo((root) => {
       const stale = checkEmit(plan(root));
-      expect(stale.map((s) => s.reason)).toEqual(['missing', 'missing']);
+      expect(stale.map((s) => s.reason)).toEqual(['missing', 'missing', 'missing']);
     });
   });
 

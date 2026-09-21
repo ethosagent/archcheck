@@ -9,6 +9,7 @@ import { EXIT, type ExitCode, exitCodeFor, load } from '../archcheck.js';
  *
  * This is an app entry point — the one place allowed to write to the console (PROD-1).
  */
+import { automatablePercent, MARK } from '../coverage/index.js';
 import { describeStale } from '../emit/write.js';
 import { reporterFor } from '../report/index.js';
 import { gitChangedFiles, HELP, type ParsedArgs, parseArgs } from './args.js';
@@ -102,12 +103,12 @@ async function runExplain(args: ParsedArgs, cwd: string): Promise<ExitCode> {
 function runCoverage(cwd: string): ExitCode {
   const loaded = load({ cwd });
   if (!loaded.ok) return fail(loaded.error, EXIT.config);
-  const { total, deterministic, proxy, model } = loaded.value.coverage();
-  const percent = total === 0 ? 0 : Math.round(((deterministic + proxy) / total) * 100);
-  console.log(`✓ ${deterministic} deterministic`);
-  console.log(`◑ ${proxy} proxy`);
-  console.log(`○ ${model} judgement`);
-  console.log(`  ${total} rules total · ${percent}% automatable`);
+  const coverage = loaded.value.coverage();
+  const { total, deterministic, proxy, model } = coverage;
+  console.log(`${MARK.deterministic} ${deterministic} deterministic`);
+  console.log(`${MARK.proxy} ${proxy} proxy`);
+  console.log(`${MARK.model} ${model} judgement`);
+  console.log(`  ${total} rules total · ${automatablePercent(coverage)}% automatable`);
   return EXIT.clean;
 }
 

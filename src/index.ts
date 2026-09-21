@@ -32,6 +32,18 @@ export {
   type ValidateCtx,
 } from './contracts/index.js';
 export {
+  automatablePercent,
+  FENCE_BEGIN,
+  FENCE_END,
+  MARK,
+  RULES_JSON,
+  type RuleSummary,
+  type RulesDocument,
+  renderRulesTable,
+  replaceFencedRegion,
+  rulesDocument,
+} from './coverage/index.js';
+export {
   type ArchitectureException,
   applyExceptions,
   todayIso,

@@ -23,6 +23,12 @@ export type ArchitectureManifest = {
   tsconfig?: string;
   /** Where generated output is written. Defaults to `generated`. */
   generatedDir?: string;
+  /**
+   * Documents with an `archcheck:begin rules-table` fence. Only the fenced region is generated —
+   * long-form prose stays hand-written, because a manifest holding paragraphs is a config file
+   * pretending to be a document (LLD §1.9).
+   */
+  docs?: string[];
   /** The only place a rule is defined. */
   rules: Rule[];
   /**
