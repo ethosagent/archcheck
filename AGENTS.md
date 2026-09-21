@@ -72,7 +72,9 @@ Alongside the rungs:
 - A bug fix goes to the **root cause**. Grep every caller of the function you touch and fix the
   shared function once. Patching only the path the report names leaves a sibling caller broken.
 - Mark a deliberate simplification that cuts a real corner with a `ponytail:` comment naming the
-  ceiling and the upgrade path. There are two in `src/`; `grep -rn 'ponytail:' src` finds them.
+  ceiling and the upgrade path. `grep -rn 'ponytail:' src` finds every one. The count is left out
+  of this sentence on purpose: a number in prose drifts the moment somebody adds a marker, and it
+  already had.
 
 **Never lazy about:** understanding the problem, validation at a trust boundary, error handling that
 prevents data loss, security, and anything explicitly requested. Lazy code without its check is
@@ -325,6 +327,7 @@ Enforced by `scripts/check-lint.sh`.
 | `src/coverage/`, `src/fs/`, `src/init/` | leaves |
 | `src/archcheck.ts` | **the composition root.** The only place the layers are wired together |
 | `src/cli/` | parse arguments, call the facade, pick a reporter. Owns no behaviour |
+| `*.test.ts`, `tests/` | the `test` layer. Exempt from the dependency law, because its job is to look at one |
 
 Everything in that table is enforced by `architecture.config.ts`. If you disagree with a line,
 change the manifest and say why — do not work around it.

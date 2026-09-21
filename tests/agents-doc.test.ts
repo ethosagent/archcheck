@@ -6,6 +6,7 @@
  * it either guesses or stops.
  */
 import { describe, expect, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -38,9 +39,21 @@ describe('the ponytail ladder is followable from AGENTS.md alone', () => {
     }
   });
 
-  test('the ponytail: ceiling marker it points at is really in src/', () => {
-    // AGENTS.md tells an agent to grep for it. It has to find something.
+  test('the grep it tells an agent to run finds something', () => {
     expect(AGENTS).toContain("grep -rn 'ponytail:' src");
+    const found = execFileSync('grep', ['-rn', 'ponytail:', 'src'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+    })
+      .trim()
+      .split('\n');
+    expect(found.length).toBeGreaterThan(0);
+  });
+
+  test('it states no COUNT of those markers — a number in prose drifts, and it did', () => {
+    // It said "there are two in src/" while there were three. The sentence now names the grep
+    // and no number, so the only way to be wrong is to delete the marker convention entirely.
+    expect(AGENTS).not.toMatch(/There are (two|three|four|\d+) in `src\/`/);
   });
 });
 
@@ -159,6 +172,20 @@ describe('the symbols AGENTS.md names exist in the files it names', () => {
       expect(readFileSync(join(ROOT, path), 'utf8')).toContain(symbol);
     });
   }
+});
+
+describe('the layout table covers every layer the manifest declares', () => {
+  test('a layer nobody documented is a layer nobody knows the rules for', () => {
+    const graph = require(join(ROOT, 'generated', 'graph.config.cjs')) as {
+      layers: { layer: string }[];
+    };
+    const table = AGENTS.split('## The layout, in one table')[1] ?? '';
+    expect(table).not.toBe('');
+    const undocumented = graph.layers
+      .map((entry) => entry.layer)
+      .filter((name) => !table.includes(name));
+    expect(undocumented).toEqual([]);
+  });
 });
 
 describe('the commands AGENTS.md tells an agent to run are real', () => {
