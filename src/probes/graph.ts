@@ -9,6 +9,7 @@
  * Diff scoping is edge-level: given a changed set, evaluate edges whose `from` is in it. An edge
  * INTO a changed file is not a new violation — the importer did not change.
  */
+import { asEncapsulationParams, resolveEncapsulation } from '../contracts/encapsulation.js';
 import { buildLayerTable, type Layer, resolveEdge } from '../contracts/layers.js';
 import { fileMatches } from '../graph/match.js';
 import type { Edge, FileFacts, ModuleGraph } from '../graph/types.js';
@@ -95,7 +96,10 @@ function layerOf(
 
 function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
   const table = buildLayerTable(ctx.rules);
-  if (table.layers.length === 0) return [];
+  const barrelRules = ctx.rules.filter(
+    (rule) => rule.kind === 'encapsulation' && rule.severity !== 'off',
+  );
+  if (table.layers.length === 0 && barrelRules.length === 0) return [];
 
   const changed = ctx.changed === undefined ? undefined : new Set(ctx.changed);
   const inScope = (file: string) =>
@@ -110,6 +114,32 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
 
   for (const edge of graph.edges) {
     if (!inScope(edge.from)) continue;
+
+    // The barrel ban is edge-level too, and independent of layers: a deep import is a deep
+    // import whether or not the two files happen to sit in the same layer.
+    if (!edge.external) {
+      const fromRelative = repoRelative(ctx.root, edge.from);
+      const toRelative = repoRelative(ctx.root, edge.to);
+      for (const rule of barrelRules) {
+        const verdict = resolveEncapsulation(asEncapsulationParams(rule), fromRelative, toRelative);
+        if (verdict.allowed) continue;
+        findings.push({
+          ruleId: rule.id,
+          file: fromRelative,
+          line: edge.line,
+          col: edge.col,
+          evidence: {
+            from: fromRelative,
+            to: toRelative,
+            module: verdict.module,
+            deepPath: verdict.deepPath,
+            specifier: edge.specifier,
+          },
+          identity: '',
+        });
+      }
+    }
+
     const from = layerFor(edge.from);
     const to = edge.external ? undefined : layerFor(edge.to);
     const verdict = resolveEdge(table, from, to?.name, edge);

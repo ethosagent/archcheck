@@ -360,3 +360,26 @@ describe('--write-graph then --ingest-graph', () => {
     expect(stderr).toContain('mutually exclusive');
   });
 });
+
+describe('the barrel ban, end to end', () => {
+  test('catches the cross-module deep import and nothing else', () => {
+    const { code, stdout } = archcheck(['--cwd', fixture('barrels'), '--format', 'json']);
+    expect(code).toBe(1);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.diagnostics).toHaveLength(1);
+    expect(parsed.diagnostics[0]).toMatchObject({
+      ruleId: 'no-deep-module-imports',
+      file: 'modules/graph/build.ts',
+      evidence: { module: 'modules/ledger', deepPath: 'domain/supersede.ts' },
+    });
+  });
+
+  test('the emitted exports map is committed alongside the graph config', () => {
+    inCopyOf('barrels', (root) => {
+      expect(archcheck(['emit', '--cwd', root]).code).toBe(0);
+      const map = JSON.parse(readFileSync(join(root, 'generated', 'exports.json'), 'utf8'));
+      expect(map.rules[0].exports).toEqual({ '.': './index.js' });
+      expect(map.$generated.doNotEdit).toBe(true);
+    });
+  });
+});

@@ -1,4 +1,13 @@
 export {
+  asEncapsulationParams,
+  type EncapsulationParams,
+  type EncapsulationVerdict,
+  encapsulationContract,
+  moduleOf,
+  publicSurfacesOf,
+  resolveEncapsulation,
+} from './encapsulation.js';
+export {
   asLayersParams,
   buildLayerTable,
   type EdgeVerdict,

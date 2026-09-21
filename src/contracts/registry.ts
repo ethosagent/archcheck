@@ -9,10 +9,11 @@
  */
 import { ok, type Result } from '../result.js';
 import type { ContractKind, Rule } from '../types.js';
+import { encapsulationContract } from './encapsulation.js';
 import { layersContract } from './layers.js';
 import type { ContractType, ValidateCtx } from './types.js';
 
-const IMPLEMENTED: readonly ContractType[] = [layersContract];
+const IMPLEMENTED: readonly ContractType[] = [layersContract, encapsulationContract];
 
 const byKind = new Map<ContractKind, ContractType>(IMPLEMENTED.map((c) => [c.kind, c]));
 
