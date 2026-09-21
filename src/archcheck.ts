@@ -234,10 +234,16 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
       const applied = applyExceptions(registry.exceptions(), normalized.value, today);
       const diagnostics = applied.diagnostics;
 
-      // The ratchet's second half. Scoped runs cannot judge it: a diff-scoped run evaluates a
-      // fraction of the repo, so "did not reproduce" would mean "was not looked at".
+      // The ratchet's second half. Only a run that looked at everything can judge it: a diff-scoped
+      // run evaluates a fraction of the repo, a tier-scoped run a fraction of the rules, and a run
+      // with a SKIPPED probe read nothing that probe reads — in all three "did not reproduce" would
+      // mean "was not looked at". Pinned by the three 'does not judge the baseline' tests in
+      // tests/adoption.test.ts.
       const baselineStale =
-        checkOptions.changed === undefined && checkOptions.baselined === undefined
+        checkOptions.changed === undefined &&
+        checkOptions.baselined === undefined &&
+        checkOptions.only === undefined &&
+        skipped.length === 0
           ? staleEntries(baseline, diagnostics)
           : [];
 
@@ -259,6 +265,19 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
       // violation visible, which is exactly what there is to record.
       const run = await this.check({ baselined: new Set<string>() });
       if (!run.ok) return err(run.error);
+
+      // Pruning is irreversible, and a degraded run cannot justify it: a probe that did not run
+      // makes every entry it would have reproduced look fixed, so the documented remedy for exit 4
+      // would erase the record instead of shrinking it. This is exit 2 through `runBaseline` in
+      // src/cli/index.ts, pinned by 'baseline --prune refuses on a degraded run rather than erasing
+      // the record'. `--write` only ever adds, so it is unaffected.
+      if (mode === 'prune' && run.value.skipped.length > 0) {
+        return err([
+          'baseline --prune needs a complete run, and this one was degraded:',
+          ...run.value.skipped.map((skip) => `  ${skip.probe} did not run: ${skip.reason}`),
+          '  → pruning now would delete entries nothing checked. Fix the above and run it again',
+        ]);
+      }
 
       const previous = readBaseline(registry.root);
       const next =

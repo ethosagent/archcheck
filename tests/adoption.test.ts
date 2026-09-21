@@ -145,6 +145,52 @@ export const alsoBad = appendEntry;
     });
   });
 
+  test('a degraded run does not judge the baseline — a skipped probe did not look either', () => {
+    inCopyOf('layered', (root) => {
+      archcheck(['baseline', '--write'], root);
+      // Without a tsconfig the graph probe cannot run, so nothing reproduces — because nothing
+      // was read, not because anything was fixed.
+      rmSync(join(root, 'tsconfig.json'));
+
+      const run = archcheck([], root);
+      expect(run.stdout).toContain('graph did not run');
+      expect(run.code).toBe(0);
+    });
+  });
+
+  test('baseline --prune refuses on a degraded run rather than erasing the record', () => {
+    inCopyOf('layered', (root) => {
+      archcheck(['baseline', '--write'], root);
+      rmSync(join(root, 'tsconfig.json'));
+
+      const pruned = archcheck(['baseline', '--prune'], root);
+      // Exit 2: the run itself is the problem, and pruning is irreversible.
+      expect(pruned.code).toBe(2);
+      expect(pruned.stderr).toContain('graph did not run');
+      const baseline = JSON.parse(readFileSync(join(root, '.archcheck', 'baseline.json'), 'utf8'));
+      expect(baseline.entries).toHaveLength(2);
+    });
+  });
+
+  test('a tier-scoped run does not judge the baseline — the excluded tier was not looked at', () => {
+    inCopyOf('layered', (root) => {
+      const path = join(root, 'architecture.config.ts');
+      writeFileSync(
+        path,
+        readFileSync(path, 'utf8').replace(
+          "      id: 'domain-no-service-import',",
+          "      id: 'domain-no-service-import',\n      confidence: 'proxy' as const,",
+        ),
+      );
+      archcheck(['baseline', '--write'], root);
+
+      // `--only deterministic` never evaluates the proxy rule, so its two baselined findings must
+      // not read as fixed.
+      expect(archcheck(['--only', 'deterministic'], root).code).toBe(0);
+      expect(archcheck([], root).code).toBe(0);
+    });
+  });
+
   test('--show-baselined reveals what the baseline is hiding', () => {
     inCopyOf('layered', (root) => {
       archcheck(['baseline', '--write'], root);
@@ -281,6 +327,26 @@ describe('exceptions', () => {
       const { code, stderr } = archcheck([], root);
       expect(code).toBe(2);
       expect(stderr).toContain('owner is required');
+    });
+  });
+
+  test('an exception whose expiry is not a real calendar date fails validation at exit 2', () => {
+    inCopyOf('clean', (root) => {
+      withException(
+        root,
+        `  exceptions: [
+    {
+      rule: 'rules-are-pure',
+      path: 'src/**',
+      owner: 'mitesh',
+      expires: '9999-99-99',
+      reason: 'a date no calendar has, which would otherwise never expire',
+    },
+  ],`,
+      );
+      const { code, stderr } = archcheck([], root);
+      expect(code).toBe(2);
+      expect(stderr).toContain('not a real calendar date');
     });
   });
 
