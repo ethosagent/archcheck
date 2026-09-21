@@ -24,6 +24,7 @@ import { readGraph } from './graph/index.js';
 import type { ModuleGraph } from './graph/types.js';
 import { type NormalizeInput, normalize } from './normalize/index.js';
 import { createGraphProbe, GRAPH_REPORT_PATH, toGraphReport } from './probes/graph.js';
+import { createLintProbe } from './probes/lint.js';
 import { isSkip, type Probe, type RunCtx } from './probes/types.js';
 import { nextIdLedger } from './registry/ids.js';
 import { open, type Registry } from './registry/index.js';
@@ -85,7 +86,7 @@ export type LoadOptions = {
 const TIER_RANK: Record<Confidence, number> = { deterministic: 0, proxy: 1, model: 2 };
 
 function probes(): Probe[] {
-  return [createGraphProbe()];
+  return [createGraphProbe(), createLintProbe()];
 }
 
 export function load(options: LoadOptions = {}): Result<ArchCheck> {
