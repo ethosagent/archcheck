@@ -38,6 +38,13 @@ function archcheck(
     env: { ...process.env, NO_COLOR: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  // A process that never started is not an exit code. `1` is archcheck's "new violations", so
+  // mapping an EAGAIN/ENOENT spawn failure onto it forges a finding and discards `run.error`.
+  if (run.error || (run.status === null && run.signal === null)) {
+    throw new Error(
+      `could not start \`bun run ${entry}\` in ${cwd}: ${run.error?.message ?? 'no exit status and no signal'}`,
+    );
+  }
   return { code: run.status ?? 1, stdout: run.stdout ?? '', stderr: run.stderr ?? '' };
 }
 
@@ -51,6 +58,22 @@ function inCopyOf<T>(name: string, body: (root: string) => T): T {
     rmSync(work, { recursive: true, force: true });
   }
 }
+
+describe('the harness itself — a spawn that never started is not an exit code', () => {
+  test('archcheck() throws, naming the command and the reason, when bun cannot be started', () => {
+    // Rule 17 in the tests: `1` is archcheck's code for "new violations", so a helper that maps an
+    // unstartable process to 1 makes an EAGAIN/ENOENT spawn failure indistinguishable from a real
+    // finding. One failure under load was already unattributable because the reason was discarded.
+    const path = process.env.PATH ?? '';
+    process.env.PATH = join(ROOT, 'no-such-directory');
+    try {
+      expect(() => archcheck(['--version'])).toThrow(/bun/);
+      expect(() => archcheck(['--version'])).toThrow(/ENOENT|not found/);
+    } finally {
+      process.env.PATH = path;
+    }
+  });
+});
 
 describe('exit code 0 — clean', () => {
   test('a repository that breaks no rule exits 0 and says so', () => {
@@ -542,8 +565,15 @@ describe('the published CLI runs when invoked under any name', () => {
       });
       return { code: 0, stdout };
     } catch (error) {
-      const e = error as { status?: number; stdout?: string };
-      return { code: e.status ?? 1, stdout: e.stdout ?? '' };
+      const e = error as { status?: number; code?: string; message?: string; stdout?: string };
+      // No numeric status means the process never started — reporting that as exit 1 would forge
+      // archcheck's "new violations" code and throw the reason away.
+      if (typeof e.status !== 'number') {
+        throw new Error(
+          `could not start \`node ${entry}\` in ${cwd}: ${e.code ?? ''} ${e.message ?? ''}`.trim(),
+        );
+      }
+      return { code: e.status, stdout: e.stdout ?? '' };
     }
   }
 

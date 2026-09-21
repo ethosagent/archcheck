@@ -19,8 +19,21 @@ function runGate(script: string): { code: number; out: string } {
     });
     return { code: 0, out };
   } catch (error) {
-    const e = error as { status?: number; stdout?: string; stderr?: string };
-    return { code: e.status ?? 1, out: `${e.stdout ?? ''}${e.stderr ?? ''}` };
+    const e = error as {
+      status?: number;
+      code?: string;
+      message?: string;
+      stdout?: string;
+      stderr?: string;
+    };
+    // No numeric status means the gate never ran. `1` is archcheck's "new violations", so mapping
+    // an EAGAIN/ENOENT spawn failure onto it forges a finding and discards the reason.
+    if (typeof e.status !== 'number') {
+      throw new Error(
+        `could not start \`bash scripts/${script}\` in ${ROOT}: ${e.code ?? ''} ${e.message ?? ''}`.trim(),
+      );
+    }
+    return { code: e.status, out: `${e.stdout ?? ''}${e.stderr ?? ''}` };
   }
 }
 

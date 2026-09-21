@@ -32,8 +32,21 @@ function archcheck(args: string[], cwd: string) {
     });
     return { code: 0, stdout, stderr: '' };
   } catch (error) {
-    const e = error as { status?: number; stdout?: string; stderr?: string };
-    return { code: e.status ?? 1, stdout: e.stdout ?? '', stderr: e.stderr ?? '' };
+    const e = error as {
+      status?: number;
+      code?: string;
+      message?: string;
+      stdout?: string;
+      stderr?: string;
+    };
+    // No numeric status means the process never started. `1` is archcheck's "new violations", so
+    // mapping an EAGAIN/ENOENT spawn failure onto it forges a finding and discards the reason.
+    if (typeof e.status !== 'number') {
+      throw new Error(
+        `could not start \`bun run ${CLI}\` in ${cwd}: ${e.code ?? ''} ${e.message ?? ''}`.trim(),
+      );
+    }
+    return { code: e.status, stdout: e.stdout ?? '', stderr: e.stderr ?? '' };
   }
 }
 
