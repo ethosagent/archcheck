@@ -1,5 +1,16 @@
 node_modules/
 dist/
-.archcheck/cache/
-.DS_Store
 *.tsbuildinfo
+
+# Emitted, gitignored half of .archcheck — the ledger and the baseline beside it ARE committed.
+.archcheck/cache/
+.archcheck/graph.json
+
+# Test runs leave these inside the fixture repos.
+fixtures/**/.archcheck/
+fixtures/**/generated/
+
+# Design documents and plans live here but are not part of the shipped package.
+plan/
+
+.DS_Store

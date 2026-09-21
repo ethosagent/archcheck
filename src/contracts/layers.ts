@@ -25,7 +25,7 @@
 import { describeMatch, isImplementsMatch, isValidMatch, type LayerMatch } from '../graph/match.js';
 import { err, ok, type Result } from '../result.js';
 import type { Fragment, RawFinding, Rule } from '../types.js';
-import type { ContractType, EmitCtx, ExplainCtx, ValidateCtx } from './types.js';
+import type { ContractType, EmitCtx, ExplainCtx, Refinement, ValidateCtx } from './types.js';
 
 export type LayersParams = {
   name: string;
@@ -268,11 +268,49 @@ function explainFinding(finding: RawFinding, rule: Rule, ctx: ExplainCtx): strin
   ].join('\n');
 }
 
+/**
+ * Case 5 of the resolution order needs its own words. "domain may import only contracts and rules"
+ * is true but irrelevant to a file that matched no layer, and "invert the call" is the wrong fix.
+ */
+function refineFinding(finding: RawFinding, rule: Rule, ctx: ExplainCtx): Refinement | undefined {
+  const evidence = finding.evidence as Record<string, unknown>;
+  if (evidence.unlayered === true) {
+    const declared = buildLayerTable(ctx.rules)
+      .layers.map((layer) => layer.name)
+      .sort()
+      .join(', ');
+    return {
+      statement: `${finding.file} belongs to no declared layer`,
+      remedy: {
+        // Deliberately no `allowed` list here. The declared layers go in the sentence instead:
+        // labelling them "allowed" would say this file may import them, which is not the problem.
+        summary:
+          `declare the layer this path belongs to in architecture.config.ts (declared so far: ` +
+          `${declared}), or move the file into one of them`,
+      },
+    };
+  }
+  const fromLayer = evidence.fromLayer;
+  const toLayer = evidence.toLayer;
+  if (typeof fromLayer === 'string' && typeof toLayer === 'string') {
+    const params = asLayersParams(rule);
+    return {
+      statement: `${fromLayer} may not import ${toLayer}`,
+      remedy: {
+        ...rule.remedy,
+        allowed: params.mayImport === '*' ? ['anything'] : (params.mayImport ?? []),
+      },
+    };
+  }
+  return undefined;
+}
+
 export const layersContract: ContractType = {
   kind: 'layers',
   validate: validateParams,
   emit: emitFragments,
   explain: explainFinding,
+  refine: refineFinding,
 };
 
 export { describeMatch };

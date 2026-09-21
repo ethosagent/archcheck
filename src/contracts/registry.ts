@@ -24,8 +24,12 @@ export function implementedKinds(): readonly ContractKind[] {
   return IMPLEMENTED.map((contract) => contract.kind);
 }
 
-/** The ParamsValidator the registry needs, wired to the kinds. Injected by the facade. */
-export function createParamsValidator(rules: readonly Rule[]): (rule: Rule) => Result<void> {
+/**
+ * The ParamsValidator the registry needs, wired to the kinds. Injected by the facade, which is the
+ * only place that knows both halves — the registry knows a rule has a kind, and only a kind knows
+ * what its params mean.
+ */
+export function validateParamsByKind(rule: Rule, rules: readonly Rule[]): Result<void> {
   const ctx: ValidateCtx = { rules };
-  return (rule) => contractFor(rule.kind)?.validate(rule, ctx) ?? ok(undefined);
+  return contractFor(rule.kind)?.validate(rule, ctx) ?? ok(undefined);
 }

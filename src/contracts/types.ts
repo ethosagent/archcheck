@@ -10,7 +10,7 @@
  * an explainer and a fixture that must fail (LLD §4).
  */
 import type { Result } from '../result.js';
-import type { ContractKind, Fragment, RawFinding, Rule } from '../types.js';
+import type { ContractKind, Fragment, RawFinding, Remedy, Rule } from '../types.js';
 
 export type ValidateCtx = {
   /** Every rule in the manifest — a kind whose meaning depends on the set can see the set. */
@@ -32,6 +32,17 @@ export type ExplainCtx = {
   rules: readonly Rule[];
 };
 
+/**
+ * A per-finding sharpening of the rule's own words.
+ *
+ * Why this exists: one rule legitimately covers findings that need different sentences. A `layers`
+ * rule states "domain may import only contracts and rules", but an UNLAYERED file broke no
+ * allow-list — it matched no layer at all, and telling its author to "invert the call" sends them
+ * to the wrong fix. The rule's statement is what the editor squiggle shows (it is per-rule); this
+ * is what a diagnostic shows (it is per-finding).
+ */
+export type Refinement = { statement?: string; remedy?: Remedy };
+
 export type ContractType = {
   kind: ContractKind;
   /** Params well-formed? Returns every problem, never throws (a bad manifest exits 2). */
@@ -40,4 +51,6 @@ export type ContractType = {
   emit(rule: Rule, ctx: EmitCtx): Fragment[];
   /** Finding → the sentence a person reads. Returns the remedy, not the symptom. */
   explain(finding: RawFinding, rule: Rule, ctx: ExplainCtx): string;
+  /** Optional: sharpen the statement or remedy for one finding. See Refinement. */
+  refine?(finding: RawFinding, rule: Rule, ctx: ExplainCtx): Refinement | undefined;
 };

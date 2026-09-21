@@ -8,5 +8,5 @@ export {
   layersContract,
   resolveEdge,
 } from './layers.js';
-export { contractFor, createParamsValidator, implementedKinds } from './registry.js';
+export { contractFor, implementedKinds, validateParamsByKind } from './registry.js';
 export type { ContractType, EmitCtx, ValidateCtx } from './types.js';
