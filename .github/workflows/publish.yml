@@ -4,8 +4,8 @@
 # runs this workflow by hand and types the version. A release that can happen by accident is a
 # release that eventually does.
 #
-# It also refuses to publish a tree that is not green: every gate runs first, in the same order
-# `bun run check` runs them, and `npm publish` is the last step.
+# It also refuses to publish a tree that is not green: `bun run check` runs every gate first,
+# and `npm publish` is the last step.
 name: publish
 
 on:
@@ -48,12 +48,19 @@ jobs:
           fi
           echo "version $declared"
 
-      # Every gate, in the same order `bun run check` runs them.
-      - run: bash scripts/check-typecheck.sh
-      - run: bash scripts/check-lint.sh
-      - run: bash scripts/check-tests.sh
-      - run: bash scripts/check-emit.sh
-      - run: bash scripts/check-selfhost.sh
+      # One step, not one per gate. `package.json`'s `prepublishOnly` already runs
+      # `bun run build && bun run check`, and npm runs it on a real `npm publish` — from a
+      # laptop too, which is the point: that guard cannot be skipped. This step stays anyway
+      # because `prepublishOnly` never fires on a dry run, and this workflow defaults to
+      # dry-run: true. Without it, a dry run would verify nothing.
+      #
+      # So a real publish runs the gates twice, here and inside npm. That is the deliberate
+      # price of an unskippable guard. Do NOT "optimise" it away by adding `--ignore-scripts`
+      # to the publish step below: that skips `prepublishOnly` and silently removes the
+      # guarantee. `scripts/run-checks.sh` reports every failing gate rather than stopping at
+      # the first, so the log still names what broke.
+      - name: every gate must pass
+        run: bun run check
       - run: bun run build
 
       - name: the package must install clean in an empty project
