@@ -56,6 +56,13 @@ export default defineArchitecture({
     },
     {
       ...law,
+      id: 'the-filesystem-is-a-leaf',
+      statement: 'the filesystem seam reads and writes and decides nothing',
+      params: { name: 'fs', match: 'src/fs/**', mayImport: ['kernel', 'util'] },
+      remedy: { summary: 'return the paths and let a probe judge them' },
+    },
+    {
+      ...law,
       id: 'the-baseline-is-a-leaf',
       statement: 'the baseline reads and writes one file and knows nothing about rules',
       params: { name: 'baseline', match: 'src/baseline/**', mayImport: ['kernel'] },
@@ -140,7 +147,7 @@ export default defineArchitecture({
       params: {
         name: 'probe',
         match: 'src/probes/**',
-        mayImport: ['kernel', 'util', 'contract', 'graph'],
+        mayImport: ['kernel', 'util', 'contract', 'graph', 'fs'],
       },
       remedy: { summary: "return a RawFinding and let the kind's explain() write the sentence" },
     },
@@ -163,6 +170,7 @@ export default defineArchitecture({
           'emit',
           'baseline',
           'exception',
+          'fs',
         ],
         catchesUnlayered: true,
       },

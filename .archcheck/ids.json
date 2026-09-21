@@ -19,6 +19,7 @@
     "reporters-read-a-runresult",
     "tests-reach-anything",
     "the-baseline-is-a-leaf",
+    "the-filesystem-is-a-leaf",
     "the-manifest-reaches-the-barrel-only",
     "util-is-a-leaf"
   ]
