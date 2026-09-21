@@ -8,7 +8,7 @@
  * What a caller must know: patterns are POSIX and repo-relative, matched against paths already
  * put through `repoRelative()`. Supported:
  *   *        any run of characters except `/`
- *   **       any run of characters including `/` (and `a/**` also matches `a` itself)
+ *   **       zero or more whole path segments (and `a/**` also matches `a` itself)
  *   ?        exactly one character except `/`
  *   {a,b}    alternation
  *   !pat     negation, when a pattern list is matched with `matchesAny`
@@ -16,23 +16,20 @@
 
 const SPECIAL = /[.+^${}()|[\]\\]/g;
 
+/**
+ * One path segment — no slashes. `*`, `?` and `{a,b}` only; `**` is handled a level up, where the
+ * pattern has already been split on `/`.
+ *
+ * ponytail: a brace group containing a slash (`{a/b,c}`) is not supported, because the split
+ * happens first. Nothing in this repo or its fixtures writes one. Upgrade path if that changes:
+ * tokenise before splitting instead of after.
+ */
 function segmentToRegex(pattern: string): string {
   let out = '';
   let i = 0;
   while (i < pattern.length) {
     const ch = pattern[i] as string;
     if (ch === '*') {
-      const isDouble = pattern[i + 1] === '*';
-      if (isDouble) {
-        // `a/**/b` and `a/**` must both match `a/b` and `a` respectively, so the slash is
-        // swallowed by the wildcard rather than required around it.
-        const before = out.endsWith('/') ? 1 : 0;
-        if (before) out = out.slice(0, -1);
-        out += '(?:/.*)?';
-        i += 2;
-        if (pattern[i] === '/') i += 1;
-        continue;
-      }
       out += '[^/]*';
       i += 1;
       continue;
@@ -57,12 +54,49 @@ function segmentToRegex(pattern: string): string {
   return out;
 }
 
+/**
+ * The whole pattern, segment by segment. `**` is the only token that spans segments, and it has
+ * three distinct shapes — getting any of them wrong is silent, because a pattern that matches
+ * nothing looks exactly like a rule that is satisfied:
+ *
+ * - a lone globstar matches everything.
+ * - a globstar as the LAST segment matches its parent directory and anything beneath it.
+ * - a globstar in any other position matches zero or more intervening segments.
+ *
+ * The third shape at the START of a pattern was the one that was broken: it produced a regex
+ * requiring a leading slash, so a leading globstar followed by a filename pattern matched only
+ * top-level files. The model probe's file scan was the caller that found it.
+ */
+function patternToRegexSource(pattern: string): string {
+  const segments = pattern.split('/');
+  let out = '';
+  let needsSeparator = false;
+
+  for (const [index, segment] of segments.entries()) {
+    const isLast = index === segments.length - 1;
+    if (segment === '**') {
+      if (isLast) {
+        out += out === '' ? '.*' : '(?:/.*)?';
+      } else {
+        out += out === '' ? '(?:[^/]+/)*' : '(?:/[^/]+)*/';
+        needsSeparator = false;
+      }
+      continue;
+    }
+    if (needsSeparator) out += '/';
+    out += segmentToRegex(segment);
+    needsSeparator = true;
+  }
+
+  return out;
+}
+
 const cache = new Map<string, RegExp>();
 
 export function globToRegExp(pattern: string): RegExp {
   const cached = cache.get(pattern);
   if (cached) return cached;
-  const compiled = new RegExp(`^${segmentToRegex(pattern)}$`);
+  const compiled = new RegExp(`^${patternToRegexSource(pattern)}$`);
   cache.set(pattern, compiled);
   return compiled;
 }

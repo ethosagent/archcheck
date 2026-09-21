@@ -32,6 +32,32 @@ describe('glob', () => {
     expect(matches('a.ts', 'axts')).toBe(false);
   });
 
+  test('a LEADING globstar matches at every depth — the bug the model probe found', () => {
+    for (const path of ['a.ts', 'src/a.ts', 'src/routes/a.ts']) {
+      expect(matches('**/*.ts', path)).toBe(true);
+    }
+    expect(matches('**/*.ts', 'src/a.js')).toBe(false);
+  });
+
+  test('a leading globstar with a brace group matches at every depth', () => {
+    const pattern = '**/*.{ts,tsx,js,jsx}';
+    expect(matches(pattern, 'src/routes/thick.ts')).toBe(true);
+    expect(matches(pattern, 'top.jsx')).toBe(true);
+    expect(matches(pattern, 'src/a.md')).toBe(false);
+  });
+
+  test('a globstar in the middle matches zero or more segments', () => {
+    expect(matches('src/**/x.ts', 'src/x.ts')).toBe(true);
+    expect(matches('src/**/x.ts', 'src/a/x.ts')).toBe(true);
+    expect(matches('src/**/x.ts', 'src/a/b/x.ts')).toBe(true);
+    expect(matches('src/**/x.ts', 'other/x.ts')).toBe(false);
+  });
+
+  test('a lone globstar matches everything', () => {
+    expect(matches('**', 'a')).toBe(true);
+    expect(matches('**', 'a/b/c.ts')).toBe(true);
+  });
+
   test('negation wins in a list', () => {
     const patterns = ['src/**', '!src/**/*.test.ts'];
     expect(matchesAny(patterns, 'src/graph/edges.ts')).toBe(true);
