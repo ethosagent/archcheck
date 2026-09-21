@@ -21,12 +21,16 @@ jobs:
         run: bash scripts/check-typecheck.sh
       - name: lint
         run: bash scripts/check-lint.sh
+      # Before `tests`, not after: dist/ is gitignored, so with build last the published-CLI
+      # symlink test in tests/cli.test.ts (AGENTS.md rule 15 — the gates cannot see a packaging
+      # bug) had to build dist/ itself, inside its own test timeout. Building here makes dist/
+      # present when the tests gate runs, and stops CI doing the same tsc build twice.
+      - name: build
+        run: bun run build
+
       - name: tests
         run: bash scripts/check-tests.sh
       - name: emit is not stale
         run: bash scripts/check-emit.sh
       - name: selfhost
         run: bash scripts/check-selfhost.sh
-
-      - name: build
-        run: bun run build

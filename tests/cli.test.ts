@@ -599,7 +599,10 @@ describe('the published CLI runs when invoked under any name', () => {
     } finally {
       rmSync(work, { recursive: true, force: true });
     }
-  });
+    // Its own timeout, above the 30s default set in scripts/check-tests.sh: this is the only test
+    // that may run a full `tsc` build (the on-demand `bun run build` above, for a fresh clone with
+    // no dist/) before it does its own work. CI builds dist/ first, so that branch is local-only.
+  }, 60000);
 });
 
 describe('SARIF and coverage, end to end (plans 18-19)', () => {
