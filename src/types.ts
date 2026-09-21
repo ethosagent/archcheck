@@ -103,7 +103,37 @@ export type Diagnostic = RawFinding & {
    * evidence (plan 07).
    */
   detectedBy: string[];
+  /** Recorded in the baseline as pre-existing debt. Debt, not policy — see `exempted`. */
   baselined: boolean;
+  /**
+   * Covered by a declared exception: owned, reasoned and expiring. Kept separate from `baselined`
+   * on purpose. A baseline entry is debt nobody has signed for; an exception is a deliberate
+   * permanent allowance somebody has. Conflating them is how debt quietly becomes policy
+   * (plan 14).
+   */
+  exempted: boolean;
+};
+
+/** One recorded pre-existing violation. Keyed by identity, never by line or by count. */
+export type BaselineEntry = {
+  identity: string;
+  ruleId: string;
+  /** ISO date. For auditing how long a piece of debt has been carried. */
+  addedAt: string;
+  note?: string;
+};
+
+/** A declared allowance, as the run sees it once today's date is known. */
+export type ExceptionStatus = {
+  ruleId: string;
+  owner: string;
+  expires: string;
+  expired: boolean;
+  /** Negative once expired. */
+  daysLeft: number;
+  reason: string;
+  /** How many findings it actually suppressed this run. Zero means it is doing nothing. */
+  suppressed: number;
 };
 
 /** Emitted config, grouped by sink. One rule may produce several (LLD §1.2). */
@@ -131,4 +161,15 @@ export type RunResult = {
   diagnostics: Diagnostic[];
   skipped: SkipRecord[];
   coverage: Coverage;
+  /**
+   * Baseline entries that no longer reproduce. The ratchet turns ONE WAY: a fixed violation that
+   * is still listed exits 4, because a baseline that only ever grows silently over-suppresses
+   * forever — the failure mode that makes baselines worthless wherever they are used badly.
+   */
+  baselineStale: BaselineEntry[];
+  /**
+   * Every declared exception, always — including the ones suppressing nothing. A silent exception
+   * decays into a permanent one (plan 15).
+   */
+  exceptions: ExceptionStatus[];
 };

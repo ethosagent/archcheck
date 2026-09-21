@@ -82,6 +82,9 @@ export function normalize(
         remedy: refinement?.remedy ?? rule.remedy,
         detectedBy: [input.detectedBy],
         baselined: baselined.has(identity),
+        // Set by applyExceptions() once today's date is known, which the normaliser has no
+        // business knowing. Debt and policy are decided in different places on purpose.
+        exempted: false,
       };
 
       const existing = byIdentity.get(identity);
