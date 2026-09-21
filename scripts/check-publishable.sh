@@ -26,7 +26,11 @@ fi
 
 bun run build
 
-listing="$(mktemp -t archcheck-pack)"
+# An explicit XXXXXX template, not `mktemp -t archcheck-pack`: GNU coreutils requires a
+# template ending in at least three X's and fails "too few X's in template" on a bare
+# prefix, while BSD mktemp on macOS accepts it — so the bare form was green locally and
+# red on the Linux CI runner. This form works on both.
+listing="$(mktemp "${TMPDIR:-/tmp}/archcheck-pack.XXXXXX")"
 trap 'rm -f "$listing"' EXIT
 npm pack --dry-run --json --ignore-scripts >"$listing"
 

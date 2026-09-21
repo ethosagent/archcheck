@@ -45,6 +45,25 @@ afterEach(() => {
   rmSync(PLANTED, { force: true });
 });
 
+// Derived from package.json exactly the way check-publishable.sh derives it, so the assertion
+// below cannot drift when a second bin or an exports subpath is added. Asserting the gate names
+// these — rather than only that it exited 0 — is what stops a crash (mktemp, a missing npm, a
+// JSON parse error) from reading as a pass, and what stops an empty derivation from printing
+// "every declared entry point is packed: " and looking like compliance (AGENTS.md rule 14).
+function declaredEntryPoints(): string[] {
+  const pkg = JSON.parse(readFileSync(MANIFEST, 'utf8'));
+  const found = new Set<string>();
+  const walk = (value: unknown) => {
+    if (typeof value === 'string') {
+      if (value.startsWith('.')) found.add(value.replace(/^\.\//, ''));
+    } else if (value && typeof value === 'object') {
+      for (const child of Object.values(value)) walk(child);
+    }
+  };
+  for (const field of [pkg.bin, pkg.exports, pkg.main, pkg.types]) walk(field);
+  return [...found];
+}
+
 describe('check-lint.sh', () => {
   test('is green on the committed tree', () => {
     expect(runGate('check-lint.sh').code).toBe(0);
@@ -78,10 +97,12 @@ describe('check-publishable.sh', () => {
   test(
     'is green on the committed tree',
     () => {
+      const declared = declaredEntryPoints();
+      expect(declared.length).toBeGreaterThan(0);
       const { code, out } = runGate('check-publishable.sh');
       expect(code).toBe(0);
       expect(out).toContain('every declared entry point is packed');
-      expect(out).toContain('dist/cli/index.js');
+      for (const entry of declared) expect(out).toContain(entry);
     },
     PACK_TIMEOUT_MS,
   );
