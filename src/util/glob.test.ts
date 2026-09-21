@@ -58,6 +58,23 @@ describe('glob', () => {
     expect(matches('**', 'a/b/c.ts')).toBe(true);
   });
 
+  test('consecutive globstars behave as one', () => {
+    expect(matches('**/**', 'a')).toBe(true);
+    expect(matches('**/**', 'a/b')).toBe(true);
+    expect(matches('a/**/**/b', 'a/b')).toBe(true);
+    expect(matches('a/**/**/b', 'a/x/b')).toBe(true);
+    expect(matches('a/**/**/b', 'a/x/y/b')).toBe(true);
+    expect(matches('a/**/**/b', 'a/x/c')).toBe(false);
+  });
+
+  test('a trailing slash means the directory and everything under it', () => {
+    expect(matches('src/util/', 'src/util/glob.ts')).toBe(true);
+    expect(matches('src/util/', 'src/util/nested/deep.ts')).toBe(true);
+    expect(matches('src/util/', 'src/util')).toBe(true);
+    expect(matches('src/util/', 'src/utility.ts')).toBe(false);
+    expect(matches('src/**/', 'src/a/b.ts')).toBe(true);
+  });
+
   test('negation wins in a list', () => {
     const patterns = ['src/**', '!src/**/*.test.ts'];
     expect(matchesAny(patterns, 'src/graph/edges.ts')).toBe(true);

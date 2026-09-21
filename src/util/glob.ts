@@ -11,6 +11,7 @@
  *   **       zero or more whole path segments (and `a/**` also matches `a` itself)
  *   ?        exactly one character except `/`
  *   {a,b}    alternation
+ *   dir/     a trailing slash is that directory and everything under it
  *   !pat     negation, when a pattern list is matched with `matchesAny`
  */
 
@@ -55,6 +56,29 @@ function segmentToRegex(pattern: string): string {
 }
 
 /**
+ * Split a pattern into the segments `patternToRegexSource` walks, with the two shapes that would
+ * otherwise compile to an unmatchable regex folded away first. Both folds exist because a pattern
+ * that matches nothing looks exactly like a rule that is satisfied (AGENTS.md rule 14).
+ *
+ * - A trailing slash is TOLERATED rather than rejected, and reads gitignore-style: the directory
+ *   and everything under it. Tolerating it costs one line, matches what every reader of a
+ *   manifest already expects a directory to mean, and a manifest is written by hand — rejecting
+ *   it would need a validation seam that does not exist here yet. So the empty final segment a
+ *   trailing slash produces becomes a globstar, which is already the spelling for "this directory
+ *   and everything beneath it". Without this the regex required a trailing slash, and no
+ *   `repoRelative()` path has one.
+ * - Consecutive globstars collapse to one. Each non-final globstar emits its own mandatory
+ *   separator, so two in a row required a double slash, which no path has either.
+ *
+ * `src/util/glob.test.ts` pins both.
+ */
+function toSegments(pattern: string): string[] {
+  const raw = pattern.split('/');
+  if (raw.length > 1 && raw[raw.length - 1] === '') raw[raw.length - 1] = '**';
+  return raw.filter((segment, index) => !(segment === '**' && raw[index - 1] === '**'));
+}
+
+/**
  * The whole pattern, segment by segment. `**` is the only token that spans segments, and it has
  * three distinct shapes — getting any of them wrong is silent, because a pattern that matches
  * nothing looks exactly like a rule that is satisfied:
@@ -66,9 +90,12 @@ function segmentToRegex(pattern: string): string {
  * The third shape at the START of a pattern was the one that was broken: it produced a regex
  * requiring a leading slash, so a leading globstar followed by a filename pattern matched only
  * top-level files. The model probe's file scan was the caller that found it.
+ *
+ * Repeated globstars and a trailing slash are folded away by `toSegments` before this walk, so
+ * every shape below sees at most one globstar in a row and no empty final segment.
  */
 function patternToRegexSource(pattern: string): string {
-  const segments = pattern.split('/');
+  const segments = toSegments(pattern);
   let out = '';
   let needsSeparator = false;
 
