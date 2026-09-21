@@ -2,11 +2,12 @@
  * The reporter registry. A new audience is one entry here and nothing else.
  */
 import { createJsonReporter } from './json.js';
+import { createSarifReporter } from './sarif.js';
 import { createTerminalReporter } from './terminal.js';
 import type { Reporter } from './types.js';
 import { createVerdictReporter } from './verdict.js';
 
-export type ReporterName = 'terminal' | 'json' | 'json-pretty' | 'verdict';
+export type ReporterName = 'terminal' | 'json' | 'json-pretty' | 'sarif' | 'verdict';
 
 export function reporterFor(name: ReporterName): Reporter {
   switch (name) {
@@ -14,6 +15,8 @@ export function reporterFor(name: ReporterName): Reporter {
       return createJsonReporter();
     case 'json-pretty':
       return createJsonReporter({ pretty: true });
+    case 'sarif':
+      return createSarifReporter();
     case 'verdict':
       return createVerdictReporter();
     case 'terminal':
@@ -22,10 +25,11 @@ export function reporterFor(name: ReporterName): Reporter {
 }
 
 export function reporterNames(): readonly ReporterName[] {
-  return ['terminal', 'json', 'json-pretty', 'verdict'];
+  return ['terminal', 'json', 'json-pretty', 'sarif', 'verdict'];
 }
 
 export { createJsonReporter, type JsonReport, toJsonReport } from './json.js';
+export { createSarifReporter, SARIF_VERSION, toSarif } from './sarif.js';
 export { createTerminalReporter } from './terminal.js';
 export { CONFIDENCE_ORDER, type ReportCtx, type Reporter, visible } from './types.js';
 export { createVerdictReporter, type Verdict, verdictFor } from './verdict.js';
