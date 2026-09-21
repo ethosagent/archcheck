@@ -1,9 +1,13 @@
 /**
- * The verdict cache, keyed on `(rule set hash, file content hash)`.
+ * The verdict cache, keyed on `(rule set hash, file path, file content)`.
  *
- * What a caller must know: the RULE SET is half the key. A changed statement or a new example
- * changes the judge's answer, so a cache keyed on the file alone would serve a verdict from a rule
- * that no longer exists — which is worse than no cache, because it is invisible.
+ * What a caller must know: THE KEY HOLDS EVERYTHING THE PROMPT HOLDS. The RULE SET is part of it,
+ * because a changed statement or a new example changes the judge's answer, so a cache keyed on the
+ * file alone would serve a verdict from a rule that no longer exists. The PATH is part of it for
+ * the same reason: `renderFileBlock` (prompt.ts) puts the path in the prompt, so two files with
+ * identical content are two different questions. Both are worse than no cache, because they are
+ * invisible — one serves a stale verdict, the other serves another file's verdict.
+ * `model.test.ts` pins both: 'keys on the RULE SET as well as the file', 'keys on the PATH too'.
  */
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -21,9 +25,9 @@ export type VerdictCache = {
   readonly hits: number;
 };
 
-export function cacheKey(ruleSetHash: string, fileContent: string): string {
+export function cacheKey(ruleSetHash: string, path: string, fileContent: string): string {
   return createHash('sha256')
-    .update(`${ruleSetHash}\u0000${fileContent}`)
+    .update(`${ruleSetHash}\u0000${path}\u0000${fileContent}`)
     .digest('hex')
     .slice(0, 32);
 }

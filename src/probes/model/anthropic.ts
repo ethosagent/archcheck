@@ -26,15 +26,58 @@ import {
   VERDICT_SCHEMA,
 } from './provider.js';
 
+/** As much of the SDK's reply as this file reads. */
+type JudgeMessage = {
+  content: { type: string; text?: string }[];
+  usage?: Record<string, number>;
+  stop_reason?: string;
+};
+
 type AnthropicClient = {
   messages: {
-    create(body: Record<string, unknown>): Promise<{
-      content: { type: string; text?: string }[];
-      usage?: Record<string, number>;
-      stop_reason?: string;
-    }>;
+    create(body: Record<string, unknown>): Promise<JudgeMessage>;
   };
 };
+
+/**
+ * Did the judge ANSWER at all? A refusal, or a reply this file cannot read, is a NON-ANSWER, and a
+ * non-answer is an error — never `ok({ verdicts: [] })`, which the caller cannot tell from
+ * "answered: no violations". The probe's `!response.ok` branch in index.ts is what makes a
+ * non-answer count as unjudged and keeps it out of the verdict cache, so one transient refusal
+ * cannot become a permanent "clean" for that file. Both halves are pinned by model.test.ts:
+ * 'a non-answer is not a clean bill of health' and 'a non-answer is not cached'.
+ *
+ * A non-answer reports no cost, because there is no verdict to attribute it to. What bounds a
+ * refusing or failing endpoint is the call cap: index.ts charges every ISSUED call to the budget.
+ */
+export function readJudgeAnswer(message: JudgeMessage): Result<JudgeResponse> {
+  if (message.stop_reason === 'refusal') {
+    return err(['the judge refused to answer — the file was not judged']);
+  }
+
+  const text = message.content.find((block) => block.type === 'text')?.text ?? '';
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return err(["the judge's answer was not JSON — the file was not judged"]);
+  }
+
+  const answered = (parsed as { verdicts?: unknown })?.verdicts;
+  if (!Array.isArray(answered)) {
+    return err(["the judge's answer did not match the verdict schema — the file was not judged"]);
+  }
+
+  // Schema-invalid output is DISCARDED, never salvaged by guessing: a judge that half-parses is a
+  // judge that invents findings. But an answer where nothing at all survived is a non-answer, not
+  // a clean file.
+  const verdicts = parseVerdicts(parsed);
+  if (answered.length > 0 && verdicts.length === 0) {
+    return err(["no verdict in the judge's answer was usable — the file was not judged"]);
+  }
+
+  return ok({ verdicts, costUsd: estimateCostUsd(message.usage ?? {}) });
+}
 
 async function loadClient(apiKey: string): Promise<Result<AnthropicClient>> {
   try {
@@ -75,26 +118,7 @@ export function createAnthropicProvider(options: { apiKey: string; model: string
           messages: [{ role: 'user', content: request.fileBlock }],
         });
 
-        // A refusal is not a verdict. Returning nothing is correct: the tier is advisory, and an
-        // empty answer degrades to "not judged" rather than to "clean".
-        if (response.stop_reason === 'refusal') {
-          return ok({ verdicts: [], costUsd: estimateCostUsd(response.usage ?? {}) });
-        }
-
-        const text = response.content.find((block) => block.type === 'text')?.text ?? '';
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(text);
-        } catch {
-          // Schema-invalid output is DISCARDED, never salvaged by guessing. A judge that
-          // half-parses is a judge that invents findings.
-          return ok({ verdicts: [], costUsd: estimateCostUsd(response.usage ?? {}) });
-        }
-
-        return ok({
-          verdicts: parseVerdicts(parsed),
-          costUsd: estimateCostUsd(response.usage ?? {}),
-        });
+        return readJudgeAnswer(response);
       } catch (error) {
         return err([`the judge could not be reached: ${(error as Error).message}`]);
       }
