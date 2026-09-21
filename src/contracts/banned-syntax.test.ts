@@ -9,6 +9,9 @@ import {
   findBannedOccurrences,
 } from './banned-syntax.js';
 
+/** The text of a computed dynamic import, built rather than written, so it is not a template. */
+const COMPUTED_SPECIFIER = ['`./', '${', 'x}.js`'].join('');
+
 function parse(source: string): ts.SourceFile {
   return ts.createSourceFile('sample.ts', source, ts.ScriptTarget.Latest, true);
 }
@@ -136,8 +139,8 @@ describe('computed-dynamic-import', () => {
       [
         {
           from: '/r/a.ts',
-          to: '`./${x}.js`',
-          specifier: '`./${x}.js`',
+          to: COMPUTED_SPECIFIER,
+          specifier: COMPUTED_SPECIFIER,
           external: false,
           typeOnly: false,
           dynamic: 'computed',

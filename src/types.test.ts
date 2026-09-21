@@ -36,6 +36,7 @@ describe('core types', () => {
       remedy: { summary: 'do the thing' },
       detectedBy: ['graph'],
       baselined: false,
+      exempted: false,
     };
     expect(complete.schemaVersion).toBe(1);
   });

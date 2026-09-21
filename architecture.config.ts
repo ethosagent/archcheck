@@ -56,6 +56,22 @@ export default defineArchitecture({
     },
     {
       ...law,
+      id: 'the-baseline-is-a-leaf',
+      statement: 'the baseline reads and writes one file and knows nothing about rules',
+      params: { name: 'baseline', match: 'src/baseline/**', mayImport: ['kernel'] },
+      remedy: {
+        summary: 'take the diagnostics as an argument; the baseline only keys off identity',
+      },
+    },
+    {
+      ...law,
+      id: 'exceptions-are-a-leaf',
+      statement: 'exceptions decide suppression from paths and dates, and run no check',
+      params: { name: 'exception', match: 'src/exceptions/**', mayImport: ['kernel', 'util'] },
+      remedy: { summary: 'take the diagnostics as an argument rather than producing them' },
+    },
+    {
+      ...law,
       id: 'contracts-know-no-probe',
       statement: 'a contract kind decides, emits and explains — it never runs anything',
       params: {
@@ -76,7 +92,13 @@ export default defineArchitecture({
       ...law,
       id: 'registry-knows-only-rules',
       statement: 'the registry knows that a rule has a kind, never what a kind means',
-      params: { name: 'registry', match: 'src/registry/**', mayImport: ['kernel', 'util'] },
+      params: {
+        name: 'registry',
+        match: 'src/registry/**',
+        // `exception` is here because the exceptions block is part of the manifest SHAPE, which
+        // the registry owns. It reaches the validator, never a probe.
+        mayImport: ['kernel', 'util', 'exception'],
+      },
       remedy: {
         summary: 'inject the kind-specific behaviour as a parameter, the way validateParams is',
         allowed: ['kernel', 'util'],
@@ -139,6 +161,8 @@ export default defineArchitecture({
           'normalize',
           'report',
           'emit',
+          'baseline',
+          'exception',
         ],
         catchesUnlayered: true,
       },
