@@ -79,6 +79,8 @@ export function fromGraphReport(report: GraphReport, root: string): ModuleGraph 
     files: report.files.map(absolute),
     edges,
     factsFor: (file) => facts.get(file),
+    // A graph restored from a report has no parsed sources; nothing that needs an AST may use it.
+    sourceFileFor: () => undefined,
     walkedCount: 0,
   };
 }

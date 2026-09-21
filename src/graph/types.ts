@@ -47,6 +47,12 @@ export type ModuleGraph = {
   files: readonly string[];
   edges: readonly Edge[];
   factsFor(file: string): FileFacts | undefined;
+  /**
+   * The SourceFile the reader already parsed. Present when the graph came from a real Program,
+   * absent when it was restored from a written report — which is why the lint probe's `run()`
+   * needs a program and its `ingest()` does not.
+   */
+  sourceFileFor(file: string): ts.SourceFile | undefined;
   /** How many files were walked rather than restored from cache — the cache-hit assertion. */
   readonly walkedCount: number;
 };

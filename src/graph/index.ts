@@ -54,6 +54,7 @@ export function readGraph(options: ReadOptions): Result<ModuleGraph> {
 
   const resolve = makeResolver(built.value.options);
   const facts = new Map<string, FileFacts>();
+  const sources = new Map<string, ts.SourceFile>();
   const edges: Edge[] = [];
   const files: string[] = [];
   let walked = 0;
@@ -62,6 +63,7 @@ export function readGraph(options: ReadOptions): Result<ModuleGraph> {
     if (source.isDeclarationFile) continue;
     if (source.fileName.includes('/node_modules/')) continue;
     files.push(source.fileName);
+    sources.set(source.fileName, source);
 
     let contentHash: string;
     try {
@@ -94,6 +96,7 @@ export function readGraph(options: ReadOptions): Result<ModuleGraph> {
     files,
     edges,
     factsFor: (file) => facts.get(file),
+    sourceFileFor: (file) => sources.get(file),
     walkedCount: walked,
   });
 }
