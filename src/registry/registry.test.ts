@@ -76,10 +76,12 @@ describe('validation', () => {
   test('a kind rejects its own params through the injected validator', () => {
     const opened = open({
       configPath: config('valid'),
-      validateParams: (rule) =>
-        rule.kind === 'layers'
+      validateParams: (rule, rules) => {
+        expect(rules.length).toBe(3);
+        return rule.kind === 'layers'
           ? { ok: false, error: ["params.mayImport names an unknown layer 'rules'"] }
-          : ok(undefined),
+          : ok(undefined);
+      },
     });
     expect(opened.ok).toBe(false);
     if (opened.ok) return;

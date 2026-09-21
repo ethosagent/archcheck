@@ -34,7 +34,7 @@ export function fileMatches(
   facts: FileFacts | undefined,
 ): boolean {
   if (isImplementsMatch(match)) {
-    return facts !== undefined && facts.implementsPorts.includes(match.implements);
+    return facts?.implementsPorts.includes(match.implements) === true;
   }
   const patterns = typeof match === 'string' ? [match] : match;
   return matchesAny(patterns, repoRelative(root, absoluteFile));

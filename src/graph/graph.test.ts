@@ -54,7 +54,8 @@ describe('edge extraction', () => {
   test('a COMPUTED dynamic import is reported, which is why we own the graph', () => {
     const computed = consumer.filter((e) => e.dynamic === 'computed');
     expect(computed).toHaveLength(1);
-    expect(computed[0]?.specifier).toContain('${which}');
+    expect(computed[0]?.specifier).toContain('which');
+    expect(computed[0]?.specifier).toContain('adapters/');
     expect(computed[0]?.line).toBeGreaterThan(0);
   });
 

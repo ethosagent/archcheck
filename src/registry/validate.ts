@@ -14,8 +14,13 @@ import { err, ok, type Result } from '../result.js';
 import { CONTRACT_KINDS, type Rule } from '../types.js';
 import type { ArchitectureManifest } from './define.js';
 
-/** The seam: kind-specific params validation, supplied by the contracts layer. */
-export type ParamsValidator = (rule: Rule) => Result<void>;
+/**
+ * The seam: kind-specific params validation, supplied by the contracts layer. It receives the
+ * whole rule set because one question genuinely needs it — "does this mayImport name a layer that
+ * exists?" — and passing it here rather than closing over it keeps the registry's only entry point
+ * a single call.
+ */
+export type ParamsValidator = (rule: Rule, rules: readonly Rule[]) => Result<void>;
 
 const SEVERITIES = new Set(['error', 'warn', 'advisory', 'off']);
 const CONFIDENCES = new Set(['deterministic', 'proxy', 'model']);
@@ -25,7 +30,12 @@ function at(index: number, id: unknown): string {
   return typeof id === 'string' && id.length > 0 ? `rules[${index}] '${id}'` : `rules[${index}]`;
 }
 
-function validateRule(rule: Rule, index: number, validateParams: ParamsValidator): string[] {
+function validateRule(
+  rule: Rule,
+  index: number,
+  validateParams: ParamsValidator,
+  allRules: readonly Rule[],
+): string[] {
   const where = at(index, rule?.id);
   const errors: string[] = [];
   const push = (field: string, problem: string) => errors.push(`${where}: ${field} ${problem}`);
@@ -78,7 +88,7 @@ function validateRule(rule: Rule, index: number, validateParams: ParamsValidator
   // Only ask the kind about params once the envelope is sound; otherwise the kind's complaint
   // is noise on top of a rule that is already malformed.
   if (errors.length === 0) {
-    const kindResult = validateParams(rule);
+    const kindResult = validateParams(rule, allRules);
     if (!kindResult.ok) for (const problem of kindResult.error) errors.push(`${where}: ${problem}`);
   }
 
@@ -100,7 +110,7 @@ export function validateManifest(
 
   const seen = new Map<string, number>();
   for (const [index, rule] of manifest.rules.entries()) {
-    errors.push(...validateRule(rule, index, validateParams));
+    errors.push(...validateRule(rule, index, validateParams, manifest.rules));
     const id = rule?.id;
     if (typeof id === 'string') {
       const first = seen.get(id);

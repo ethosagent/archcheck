@@ -91,7 +91,9 @@ export function loadManifestFrom(configPath: string): Result<LoadedManifest> {
 
   const moduleShim: { exports: Record<string, unknown> } = { exports: {} };
   try {
-    // biome-ignore lint/security/noGlobalEval: compiling the operator's own config is the job.
+    // `new Function` rather than `eval`: the config body gets its own scope with exactly the five
+    // CommonJS bindings it expects and nothing of ours. Compiling the operator's own committed
+    // config is the job of this module, not an escape hatch.
     const evaluate = new Function(
       'exports',
       'require',
