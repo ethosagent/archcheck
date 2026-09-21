@@ -65,13 +65,19 @@ function expandForFile(template: string, path: string): string {
 }
 
 /**
- * A layers rule whose allow-list is `'*'` declares SCOPE rather than constraining anything — it
- * can never produce a finding, so demanding a fixture for it would be demanding a file that
- * cannot contain a violation. Derived from the rule's own params, not an exemption list.
+ * A layers rule whose allow-list is `'*'` declares SCOPE rather than constraining anything, so it
+ * cannot produce an edge violation and demanding a fixture for it would demand a file that cannot
+ * contain one. Derived from the rule's own params, never an exemption list.
+ *
+ * `catchesUnlayered` is the exception, and it matters: a rule that owns the unlayered-file report
+ * CAN fire — on a folder nobody declared — even when its allow-list is `'*'`. Missing that would
+ * have quietly excused the one rule in a manifest most worth proving.
  */
 function canEverFire(rule: Rule): boolean {
   if (rule.kind !== 'layers') return true;
-  return (rule.params as { mayImport?: unknown }).mayImport !== '*';
+  const params = rule.params as { mayImport?: unknown; catchesUnlayered?: unknown };
+  if (params.catchesUnlayered === true) return true;
+  return params.mayImport !== '*';
 }
 
 export function subjectsFor(
