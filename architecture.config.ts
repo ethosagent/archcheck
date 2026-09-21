@@ -19,6 +19,10 @@ const law = {
 };
 
 export default defineArchitecture({
+  // The generated region of this document is replaced on every emit, and a hand-edit inside the
+  // fence fails `emit --check`.
+  docs: ['RULES.md'],
+
   rules: [
     // ── the dependency law ────────────────────────────────────────────────────────────────────
     {
@@ -53,6 +57,13 @@ export default defineArchitecture({
       statement: 'a utility reaches the kernel and nothing else',
       params: { name: 'util', match: 'src/util/**', mayImport: ['kernel'] },
       remedy: { summary: 'take what you need as an argument instead of importing it' },
+    },
+    {
+      ...law,
+      id: 'coverage-is-computed-from-rules-alone',
+      statement: 'coverage counts rules and renders a table, and checks nothing',
+      params: { name: 'coverage', match: 'src/coverage/**', mayImport: ['kernel'] },
+      remedy: { summary: 'take the rules and the counts as arguments; do not go looking for them' },
     },
     {
       ...law,
@@ -134,7 +145,7 @@ export default defineArchitecture({
       params: {
         name: 'emit',
         match: 'src/emit/**',
-        mayImport: ['kernel', 'util', 'contract', 'registry'],
+        mayImport: ['kernel', 'util', 'contract', 'registry', 'coverage'],
       },
       remedy: {
         summary: 'emit is a pure function of the manifest; move the runtime part to a probe',
@@ -171,6 +182,7 @@ export default defineArchitecture({
           'baseline',
           'exception',
           'fs',
+          'coverage',
         ],
         catchesUnlayered: true,
       },
@@ -195,7 +207,7 @@ export default defineArchitecture({
       params: {
         name: 'cli',
         match: 'src/cli/**',
-        mayImport: ['kernel', 'util', 'facade', 'report', 'emit'],
+        mayImport: ['kernel', 'util', 'facade', 'report', 'emit', 'coverage'],
       },
       remedy: {
         summary: 'add the capability to ArchCheck instead: the agent hook does not shell out',

@@ -131,7 +131,9 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
       root: registry.root,
       configPath: registry.configPath,
       rules: registry.all(),
+      coverage: registry.coverage(),
       generatedDir,
+      docs: registry.manifest.docs ?? [],
       contractFor,
     });
 

@@ -1,0 +1,210 @@
+{
+  "schemaVersion": 1,
+  "coverage": {
+    "total": 22,
+    "deterministic": 21,
+    "proxy": 1,
+    "model": 0,
+    "automatable": 100
+  },
+  "rules": [
+    {
+      "id": "cli-owns-no-behaviour",
+      "kind": "layers",
+      "statement": "the CLI parses arguments, calls the facade and picks a reporter — nothing else",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "add the capability to ArchCheck instead: the agent hook does not shell out"
+    },
+    {
+      "id": "contracts-know-no-probe",
+      "kind": "layers",
+      "statement": "a contract kind decides, emits and explains — it never runs anything",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "return the decision as data and let a probe do the walking"
+    },
+    {
+      "id": "coverage-is-computed-from-rules-alone",
+      "kind": "layers",
+      "statement": "coverage counts rules and renders a table, and checks nothing",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "take the rules and the counts as arguments; do not go looking for them"
+    },
+    {
+      "id": "emit-reads-contracts-not-probes",
+      "kind": "layers",
+      "statement": "the emitter asks a contract kind for fragments and never runs a probe",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "emit is a pure function of the manifest; move the runtime part to a probe"
+    },
+    {
+      "id": "exceptions-are-a-leaf",
+      "kind": "layers",
+      "statement": "exceptions decide suppression from paths and dates, and run no check",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "take the diagnostics as an argument rather than producing them"
+    },
+    {
+      "id": "filenames-are-camel-case-or-kebab",
+      "kind": "naming",
+      "statement": "a filename is camelCase, or kebab-case when it names a contract kind",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "rename the file"
+    },
+    {
+      "id": "graph-reports-facts-only",
+      "kind": "layers",
+      "statement": "the graph reader reports facts and evaluates no rule",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "move the judgement into a contract kind; the graph only observes"
+    },
+    {
+      "id": "kernel-imports-nothing",
+      "kind": "layers",
+      "statement": "the kernel imports nothing internal — not a layer, and not the TypeScript SDK",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "if the kernel needs it, it is not the kernel: move the type down or the code up"
+    },
+    {
+      "id": "no-computed-dynamic-import",
+      "kind": "banned-syntax",
+      "statement": "a dynamic import names its module literally, so the graph stays complete",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "import the candidates statically and pick between them"
+    },
+    {
+      "id": "no-console-outside-an-entry-point",
+      "kind": "banned-syntax",
+      "statement": "logging goes through one seam, so the server stays embeddable",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "return the text and let the CLI print it"
+    },
+    {
+      "id": "no-empty-catch",
+      "kind": "banned-syntax",
+      "statement": "a caught error is handled, rethrown, or its silence is explained",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "handle it, rethrow it, or leave a comment saying why ignoring is safe"
+    },
+    {
+      "id": "no-inline-suppression",
+      "kind": "banned-syntax",
+      "statement": "an exception lives in the manifest with an owner and an expiry, never inline",
+      "severity": "error",
+      "confidence": "proxy",
+      "mark": "◑",
+      "remedy": "declare an exception in architecture.config.ts, with an owner and an expiry"
+    },
+    {
+      "id": "normalize-adds-only",
+      "kind": "layers",
+      "statement": "the normaliser enriches a finding and runs no check of its own",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "inject it, the way refine is injected, rather than importing a kind"
+    },
+    {
+      "id": "only-the-facade-wires-layers",
+      "kind": "layers",
+      "statement": "the facade is the one place the layers are wired together",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "wire it in src/archcheck.ts — that is the composition root, and the only one"
+    },
+    {
+      "id": "probes-never-report",
+      "kind": "layers",
+      "statement": "a probe returns evidence, never prose and never a verdict",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "return a RawFinding and let the kind's explain() write the sentence"
+    },
+    {
+      "id": "registry-knows-only-rules",
+      "kind": "layers",
+      "statement": "the registry knows that a rule has a kind, never what a kind means",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "inject the kind-specific behaviour as a parameter, the way validateParams is"
+    },
+    {
+      "id": "reporters-read-a-runresult",
+      "kind": "layers",
+      "statement": "a reporter reads a RunResult and reaches for nothing else",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "put what the reporter needs into the Diagnostic, so every audience gets it"
+    },
+    {
+      "id": "tests-reach-anything",
+      "kind": "layers",
+      "statement": "a test may reach any layer, because its job is to look at one",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "nothing to do — tests are exempt from the layer law by design"
+    },
+    {
+      "id": "the-baseline-is-a-leaf",
+      "kind": "layers",
+      "statement": "the baseline reads and writes one file and knows nothing about rules",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "take the diagnostics as an argument; the baseline only keys off identity"
+    },
+    {
+      "id": "the-filesystem-is-a-leaf",
+      "kind": "layers",
+      "statement": "the filesystem seam reads and writes and decides nothing",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "return the paths and let a probe judge them"
+    },
+    {
+      "id": "the-manifest-reaches-the-barrel-only",
+      "kind": "layers",
+      "statement": "the manifest imports archcheck through its public surface, like any consumer",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "import from './src/index.js' — reaching inside would make the manifest a consumer no other repo could be"
+    },
+    {
+      "id": "util-is-a-leaf",
+      "kind": "layers",
+      "statement": "a utility reaches the kernel and nothing else",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "take what you need as an argument instead of importing it"
+    }
+  ]
+}

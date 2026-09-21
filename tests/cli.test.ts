@@ -115,7 +115,7 @@ describe('exit code 2 — configuration invalid', () => {
   test('an unknown --format value exits 2 and lists the valid ones', () => {
     const { code, stderr } = archcheck(['--cwd', fixture('clean'), '--format', 'yaml']);
     expect(code).toBe(2);
-    expect(stderr).toContain('--format expects one of terminal, json, json-pretty, verdict');
+    expect(stderr).toContain('--format expects one of terminal, json, json-pretty, sarif, verdict');
   });
 });
 
@@ -447,5 +447,125 @@ describe('the published CLI runs when invoked under any name', () => {
     } finally {
       rmSync(work, { recursive: true, force: true });
     }
+  });
+});
+
+describe('SARIF and coverage, end to end (plans 18-19)', () => {
+  test('--format sarif emits a 2.1.0 document with our extras in properties', () => {
+    const { stdout, code } = archcheck(['--cwd', fixture('layered'), '--format', 'sarif']);
+    expect(code).toBe(1);
+    const sarif = JSON.parse(stdout);
+    expect(sarif.version).toBe('2.1.0');
+    const run = sarif.runs[0];
+    expect(run.tool.driver.name).toBe('archcheck');
+    expect(run.results).toHaveLength(2);
+    expect(run.results[0].properties.identity).toHaveLength(16);
+    expect(run.results[0].partialFingerprints.archcheckIdentity).toHaveLength(16);
+    // Every ruleId is declared, or an editor viewer shows a result with no rule behind it.
+    const declared = new Set(run.tool.driver.rules.map((r: { id: string }) => r.id));
+    for (const result of run.results) expect(declared.has(result.ruleId)).toBe(true);
+  });
+
+  test('a baselined finding appears in SARIF as suppressed, not as absent', () => {
+    inCopyOf('layered', (root) => {
+      archcheck(['baseline', '--write'], root);
+      const sarif = JSON.parse(archcheck(['--format', 'sarif'], root).stdout);
+      const results = sarif.runs[0].results;
+      expect(results).toHaveLength(2);
+      for (const result of results) {
+        expect(result.suppressions[0].justification).toContain('.archcheck/baseline.json');
+      }
+    });
+  });
+
+  test('coverage prints the computed counts and percentage', () => {
+    const { stdout, code } = archcheck(['coverage', '--cwd', fixture('layered')]);
+    expect(code).toBe(0);
+    expect(stdout).toContain('✓ 5 deterministic');
+    expect(stdout).toContain('5 rules total · 100% automatable');
+  });
+
+  test('adding a judgement rule moves the percentage down', () => {
+    inCopyOf('layered', (root) => {
+      const config = join(root, 'architecture.config.ts');
+      writeFileSync(
+        config,
+        readFileSync(config, 'utf8').replace(
+          '  ],\n});',
+          `    {
+      id: 'controllers-stay-thin',
+      kind: 'judgement' as const,
+      statement: 'a controller decides nothing',
+      severity: 'advisory' as const,
+      confidence: 'model' as const,
+      params: { statement: 'no business branch', appliesTo: 'modules/**' },
+      remedy: { summary: 'move the branch into the domain' },
+    },
+  ],
+});`,
+        ),
+      );
+      const { stdout } = archcheck(['coverage'], root);
+      expect(stdout).toContain('○ 1 judgement');
+      expect(stdout).toContain('6 rules total · 83% automatable');
+    });
+  });
+
+  test('rules.json is emitted as data, schema-versioned and sorted', () => {
+    inCopyOf('layered', (root) => {
+      archcheck(['emit'], root);
+      const rules = JSON.parse(readFileSync(join(root, 'generated', 'rules.json'), 'utf8'));
+      expect(rules.schemaVersion).toBe(1);
+      expect(rules.coverage.automatable).toBe(100);
+      expect(rules.rules.map((r: { id: string }) => r.id)).toEqual([
+        'contracts-import-nothing',
+        'domain-no-service-import',
+        'repositories-reach-contracts-only',
+        'rules-are-pure',
+        'services-orchestrate-only',
+      ]);
+    });
+  });
+
+  test('two consecutive emits produce identical output', () => {
+    inCopyOf('layered', (root) => {
+      archcheck(['emit'], root);
+      const first = readFileSync(join(root, 'generated', 'rules.json'), 'utf8');
+      archcheck(['emit'], root);
+      expect(readFileSync(join(root, 'generated', 'rules.json'), 'utf8')).toBe(first);
+      expect(archcheck(['emit', '--check'], root).code).toBe(0);
+    });
+  });
+});
+
+describe('the fenced document region (plan 19)', () => {
+  test('is replaced on emit, and a hand-edit inside it exits 3', () => {
+    inCopyOf('layered', (root) => {
+      const doc = join(root, 'PATTERNS.md');
+      writeFileSync(
+        doc,
+        '# Patterns\n\nHand-written prose that must survive.\n\n<!-- archcheck:begin rules-table -->\n<!-- archcheck:end rules-table -->\n\nMore prose.\n',
+      );
+      const config = join(root, 'architecture.config.ts');
+      writeFileSync(
+        config,
+        readFileSync(config, 'utf8').replace(
+          'export default defineArchitecture({',
+          "export default defineArchitecture({\n  docs: ['PATTERNS.md'],",
+        ),
+      );
+
+      expect(archcheck(['emit'], root).code).toBe(0);
+      const generated = readFileSync(doc, 'utf8');
+      expect(generated).toContain('Hand-written prose that must survive.');
+      expect(generated).toContain('More prose.');
+      expect(generated).toContain('| ✓ | `domain-no-service-import` |');
+      expect(archcheck(['emit', '--check'], root).code).toBe(0);
+
+      writeFileSync(doc, generated.replace('`domain-no-service-import`', '`someone-typed-here`'));
+      const stale = archcheck(['emit', '--check'], root);
+      expect(stale.code).toBe(3);
+      expect(stale.stderr).toContain('PATTERNS.md');
+    });
   });
 });
