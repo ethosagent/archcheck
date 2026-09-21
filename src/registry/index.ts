@@ -30,11 +30,17 @@ export type Registry = {
   byKind(kind: ContractKind): readonly Rule[];
   coverage(): Coverage;
   exceptions(): readonly ArchitectureException[];
+  /** Things that load fine but somebody should see. Printed, never silently dropped. */
+  warnings(): readonly string[];
   /** The id ledger `emit` should write next. */
   ledger(): IdLedger;
 };
 
-function createRegistry(loaded: LoadedManifest, ledger: IdLedger): Registry {
+function createRegistry(
+  loaded: LoadedManifest,
+  ledger: IdLedger,
+  warnings: readonly string[],
+): Registry {
   const rules = loaded.manifest.rules;
   const byId = new Map(rules.map((rule) => [rule.id, rule]));
 
@@ -58,6 +64,7 @@ function createRegistry(loaded: LoadedManifest, ledger: IdLedger): Registry {
       };
     },
     exceptions: () => loaded.manifest.exceptions ?? [],
+    warnings: () => warnings,
     ledger: () => ledger,
   };
 }
@@ -68,6 +75,8 @@ export type OpenOptions = {
   configPath?: string;
   /** Kind-specific params validation, injected by the composition root. */
   validateParams: ParamsValidator;
+  /** Kind-specific load-time warnings, injected the same way. */
+  collectWarnings?: (rules: readonly Rule[]) => string[];
   /** Skip the id-immutability ledger. Only `emit` and tests have a reason to. */
   skipIdCheck?: boolean;
 };
@@ -91,7 +100,7 @@ export function open(options: OpenOptions): Result<Registry> {
     if (!immutable.ok) return err(immutable.error);
   }
 
-  return ok(createRegistry(loaded, ledger));
+  return ok(createRegistry(loaded, ledger, options.collectWarnings?.(loaded.manifest.rules) ?? []));
 }
 
 export { type ArchitectureManifest, defineArchitecture } from './define.js';

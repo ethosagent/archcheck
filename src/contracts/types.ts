@@ -47,6 +47,12 @@ export type ContractType = {
   kind: ContractKind;
   /** Params well-formed? Returns every problem, never throws (a bad manifest exits 2). */
   validate(rule: Rule, ctx: ValidateCtx): Result<void>;
+  /**
+   * Optional: things that load fine but somebody should see. A judgement rule promoted to `error`
+   * is legal policy and a visible act — so it warns rather than failing, and warning rather than
+   * silence is the whole point.
+   */
+  warn?(rule: Rule, ctx: ValidateCtx): string[];
   /** One rule → many sinks. The merger groups fragments by target (LLD §1.2). */
   emit(rule: Rule, ctx: EmitCtx): Fragment[];
   /** Finding → the sentence a person reads. Returns the remedy, not the symptom. */

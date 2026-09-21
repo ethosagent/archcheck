@@ -26,6 +26,13 @@ export {
   resolveEncapsulation,
 } from './encapsulation.js';
 export {
+  asJudgementParams,
+  effectiveConfidence,
+  type JudgementParams,
+  judgementApplies,
+  judgementContract,
+} from './judgement.js';
+export {
   asLayersParams,
   buildLayerTable,
   type EdgeVerdict,
@@ -44,7 +51,7 @@ export {
   namingApplies,
   namingContract,
 } from './naming.js';
-export { contractFor, implementedKinds, validateParamsByKind } from './registry.js';
+export { contractFor, implementedKinds, validateParamsByKind, warningsFor } from './registry.js';
 export {
   asRequiredFileParams,
   isRuleSelector,

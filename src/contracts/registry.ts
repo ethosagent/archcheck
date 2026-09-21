@@ -12,6 +12,7 @@ import type { ContractKind, Rule } from '../types.js';
 import { bannedSyntaxContract } from './banned-syntax.js';
 import { declaredFieldContract } from './declared-field.js';
 import { encapsulationContract } from './encapsulation.js';
+import { judgementContract } from './judgement.js';
 import { layersContract } from './layers.js';
 import { namingContract } from './naming.js';
 import { requiredFileContract } from './required-file.js';
@@ -24,6 +25,7 @@ const IMPLEMENTED: readonly ContractType[] = [
   bannedSyntaxContract,
   requiredFileContract,
   declaredFieldContract,
+  judgementContract,
 ];
 
 const byKind = new Map<ContractKind, ContractType>(IMPLEMENTED.map((c) => [c.kind, c]));
@@ -44,4 +46,10 @@ export function implementedKinds(): readonly ContractKind[] {
 export function validateParamsByKind(rule: Rule, rules: readonly Rule[]): Result<void> {
   const ctx: ValidateCtx = { rules };
   return contractFor(rule.kind)?.validate(rule, ctx) ?? ok(undefined);
+}
+
+/** Things that load fine but somebody should see. Printed by the CLI, never silently dropped. */
+export function warningsFor(rules: readonly Rule[]): string[] {
+  const ctx: ValidateCtx = { rules };
+  return rules.flatMap((rule) => contractFor(rule.kind)?.warn?.(rule, ctx) ?? []);
 }
