@@ -5,7 +5,7 @@
  * through the real binary rather than through the facade.
  */
 import { describe, expect, test } from 'bun:test';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   cpSync,
   existsSync,
@@ -22,23 +22,23 @@ const ROOT = join(import.meta.dir, '..');
 const CLI = join(ROOT, 'src', 'cli', 'index.ts');
 const fixture = (name: string) => join(ROOT, 'fixtures', 'repos', name);
 
+/**
+ * spawnSync, not execFileSync: a warning printed by a command that SUCCEEDS is invisible to
+ * execFileSync, which hands back stdout only. That is precisely where `emit`'s "no configuration
+ * was generated for this kind" line lives.
+ */
 function archcheck(
   args: string[],
   cwd = ROOT,
   entry = CLI,
 ): { code: number; stdout: string; stderr: string } {
-  try {
-    const stdout = execFileSync('bun', ['run', entry, ...args], {
-      cwd,
-      encoding: 'utf8',
-      env: { ...process.env, NO_COLOR: '1' },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    return { code: 0, stdout, stderr: '' };
-  } catch (error) {
-    const e = error as { status?: number; stdout?: string; stderr?: string };
-    return { code: e.status ?? 1, stdout: e.stdout ?? '', stderr: e.stderr ?? '' };
-  }
+  const run = spawnSync('bun', ['run', entry, ...args], {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, NO_COLOR: '1' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  return { code: run.status ?? 1, stdout: run.stdout ?? '', stderr: run.stderr ?? '' };
 }
 
 function inCopyOf<T>(name: string, body: (root: string) => T): T {
@@ -174,6 +174,92 @@ describe('exit code 3 — emitted output is stale', () => {
   });
 });
 
+describe('a corrupt id ledger', () => {
+  /**
+   * A truncated, half-written or badly-merged `.archcheck/ids.json` used to take the same path as
+   * "no ledger yet": an empty id list, which passes every rename because there is no recorded id
+   * left to disappear. The immutability guarantee switched itself off, silently.
+   */
+  const TRUNCATED = '{ "schemaVersion": 1, "ids": [trunc';
+
+  function withCorruptLedger(root: string): void {
+    writeFileSync(join(root, '.archcheck', 'ids.json'), TRUNCATED);
+  }
+
+  test('exits 2 instead of letting a renamed rule through', () => {
+    inCopyOf('clean', (root) => {
+      expect(archcheck(['emit', '--cwd', root]).code).toBe(0);
+      withCorruptLedger(root);
+      const config = join(root, 'architecture.config.ts');
+      writeFileSync(
+        config,
+        readFileSync(config, 'utf8').replace("id: 'rules-are-pure'", "id: 'rules-are-pure-v2'"),
+      );
+
+      const { code, stderr } = archcheck(['--cwd', root]);
+      expect(code).toBe(2);
+      expect(stderr).toContain('.archcheck/ids.json');
+      expect(stderr).toContain('could not be read');
+    });
+  });
+
+  test('stops `emit`, which would otherwise rebuild it and erase every id it could not read', () => {
+    inCopyOf('clean', (root) => {
+      archcheck(['emit', '--cwd', root]);
+      withCorruptLedger(root);
+
+      const { code, stderr } = archcheck(['emit', '--cwd', root]);
+      expect(code).toBe(2);
+      expect(stderr).toContain('could not be read');
+      expect(readFileSync(join(root, '.archcheck', 'ids.json'), 'utf8')).toBe(TRUNCATED);
+    });
+  });
+
+  test('no ledger at all is still the normal first run', () => {
+    inCopyOf('clean', (root) => {
+      expect(existsSync(join(root, '.archcheck', 'ids.json'))).toBe(false);
+      expect(archcheck(['emit', '--cwd', root]).code).toBe(0);
+      expect(existsSync(join(root, '.archcheck', 'ids.json'))).toBe(true);
+    });
+  });
+});
+
+describe('a rule kind nothing implements', () => {
+  /**
+   * `forbidden` is a member of the closed set of eight with no contract type, so it emits no
+   * fragment. `emit` is its own command — a CI lane that runs only `archcheck emit` sees neither
+   * `RunResult.skipped` nor `Coverage.unchecked` — so the plan's `unimplemented` has to be said
+   * out loud here or not at all.
+   */
+  const FORBIDDEN_RULE = `    {
+      id: 'one-specific-edge',
+      kind: 'forbidden' as const,
+      statement: 'this one edge is banned',
+      severity: 'error' as const,
+      confidence: 'deterministic' as const,
+      params: { from: 'src/a/**', to: 'src/b/**' },
+      remedy: { summary: 'do not import it' },
+    },
+  ],
+});`;
+
+  test('is named by `emit` and by `emit --check`, which generate nothing for it', () => {
+    inCopyOf('clean', (root) => {
+      const config = join(root, 'architecture.config.ts');
+      writeFileSync(config, readFileSync(config, 'utf8').replace('  ],\n});', FORBIDDEN_RULE));
+
+      const emitted = archcheck(['emit', '--cwd', root]);
+      expect(emitted.code).toBe(0);
+      expect(emitted.stderr).toContain("'forbidden'");
+      expect(emitted.stderr).toContain('no configuration');
+
+      const checked = archcheck(['emit', '--check', '--cwd', root]);
+      expect(checked.code).toBe(0);
+      expect(checked.stderr).toContain("'forbidden'");
+    });
+  });
+});
+
 describe('--format routes to the right reporter', () => {
   test('json is one line, schema-versioned, and always carries skipped', () => {
     const { stdout } = archcheck(['--cwd', fixture('layered'), '--format', 'json']);
@@ -238,6 +324,29 @@ describe('--changed', () => {
     ]);
     expect(JSON.parse(scoped.stdout).diagnostics).toHaveLength(1);
     expect(scoped.code).toBe(1);
+  });
+
+  /**
+   * The regression test for "did nothing and exited 0", one level up from the entry-point bug
+   * below. `gitChangedFiles` wrapped all three git calls in a bare catch returning `[]`, so git
+   * missing from PATH, an unborn HEAD, or a directory outside any work tree scoped the run to
+   * NOTHING and reported a clean tree — a pre-commit hook that passes every commit forever.
+   *
+   * The fixture copy lives under os.tmpdir(), which is outside this repository's work tree, so git
+   * really does fail here.
+   */
+  test('git failing is a config error (2), never an empty changed set', () => {
+    inCopyOf('layered', (root) => {
+      // The violations are there to be found: the unscoped run exits 1.
+      expect(archcheck(['--cwd', root]).code).toBe(1);
+
+      const asked = archcheck(['--cwd', root, '--changed', '--format', 'json']);
+      expect(asked.code).toBe(2);
+      expect(asked.stderr).toContain('--changed');
+      expect(asked.stderr.toLowerCase()).toContain('not a git repository');
+      // No report at all: a clean-looking JSON document would be the silent failure itself.
+      expect(asked.stdout).toBe('');
+    });
   });
 });
 
@@ -584,6 +693,29 @@ describe('the fenced document region (plan 19)', () => {
       const stale = archcheck(['emit', '--check'], root);
       expect(stale.code).toBe(3);
       expect(stale.stderr).toContain('PATTERNS.md');
+    });
+  });
+
+  test('a declared document that is not there is reported, never quietly dropped', () => {
+    inCopyOf('layered', (root) => {
+      const config = join(root, 'architecture.config.ts');
+      writeFileSync(
+        config,
+        readFileSync(config, 'utf8').replace(
+          'export default defineArchitecture({',
+          "export default defineArchitecture({\n  docs: ['PATTERNS.md'],",
+        ),
+      );
+      // No PATTERNS.md on disk. `planEmit` used to drop it from the plan, so `emit --check`
+      // never compared it and answered "emitted output is up to date".
+      expect(archcheck(['emit'], root).code).toBe(0);
+
+      const { code, stderr, stdout } = archcheck(['emit', '--check'], root);
+      expect(code).toBe(3);
+      expect(stderr).toContain('PATTERNS.md');
+      expect(stdout).not.toContain('up to date');
+      // Re-emitting cannot create a document nobody wrote, so it is not offered as the fix.
+      expect(stderr).not.toContain('run: npx archcheck emit');
     });
   });
 });

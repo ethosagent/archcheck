@@ -20,6 +20,7 @@ import {
   load,
 } from '../archcheck.js';
 import { automatablePercent, MARK } from '../coverage/index.js';
+import { describeUnimplemented } from '../emit/index.js';
 import { describeStale } from '../emit/write.js';
 import { reporterFor } from '../report/index.js';
 import { gitChangedFiles, HELP, type ParsedArgs, parseArgs } from './args.js';
@@ -38,7 +39,15 @@ async function runCheck(args: ParsedArgs, cwd: string): Promise<ExitCode> {
   // possible to promote one quietly.
   for (const warning of loaded.value.registry.warnings()) console.error(`warning: ${warning}`);
 
-  const changed = args.changed?.length === 0 ? gitChangedFiles(cwd) : args.changed;
+  // `--changed` with no value means "ask git". A git that cannot answer is a failure, never an
+  // empty changed set: every probe would filter to nothing and the run would read as clean
+  // (gitChangedFiles, src/cli/args.ts).
+  let changed = args.changed;
+  if (args.changed?.length === 0) {
+    const asked = gitChangedFiles(cwd);
+    if (!asked.ok) return fail(asked.error, EXIT.config);
+    changed = asked.value;
+  }
   const result = await loaded.value.check({
     ...(changed === undefined ? {} : { changed }),
     ...(args.only === undefined ? {} : { only: args.only }),
@@ -62,6 +71,16 @@ async function runEmit(args: ParsedArgs, cwd: string): Promise<ExitCode> {
   const loaded = load({ cwd, skipIdCheck: args.emitCheck === false });
   if (!loaded.ok) return fail(loaded.error, EXIT.config);
 
+  // Skipping the immutability check is not the same as accepting a ledger nobody could read:
+  // `emit` WRITES the ledger, so it would replace it with one rebuilt from today's manifest and
+  // every retired id would vanish. `readIdLedger` (src/registry/ids.ts) marks it.
+  const ledger = loaded.value.registry.ledger();
+  if (ledger.unreadable !== undefined) return fail([ledger.unreadable], EXIT.config);
+
+  // A kind no contract type implements generates nothing. `emit` has no `skipped` channel, so
+  // this is the one place it is said — on both the write and the --check path.
+  for (const line of describeUnimplemented(loaded.value.registry.all())) console.error(line);
+
   if (args.emitCheck) {
     const stale = loaded.value.emitCheck();
     if (!stale.ok) return fail(stale.error, EXIT.config);
@@ -73,7 +92,11 @@ async function runEmit(args: ParsedArgs, cwd: string): Promise<ExitCode> {
       [
         'emitted output is stale:',
         ...describeStale(stale.value).map((line) => `  ${line}`),
-        '  → run: npx archcheck emit',
+        // `unreadable` is the one reason re-emitting cannot fix — the document `docs` names is not
+        // there — so an agent is not sent round a loop that changes nothing.
+        ...(stale.value.some((file) => file.reason !== 'unreadable')
+          ? ['  → run: npx archcheck emit']
+          : []),
       ],
       EXIT.stale,
     );
