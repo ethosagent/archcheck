@@ -249,7 +249,12 @@ describe('--only', () => {
       statement: 'a controller decides nothing',
       severity: 'advisory' as const,
       confidence: 'model' as const,
-      params: { statement: 'no business branch', appliesTo: 'modules/**' },
+      params: {
+        statement: 'A controller must not decide a business outcome.',
+        appliesTo: 'modules/**',
+        examples: { pass: ['return decide(x);'], fail: ['if (a > b) return "no";'] },
+        cite: 'the deciding branch',
+      },
       remedy: { summary: 'move the branch into the domain' },
     },
   ],
@@ -259,11 +264,13 @@ describe('--only', () => {
 
       const all = JSON.parse(archcheck(['--cwd', root, '--format', 'json']).stdout);
       expect(all.coverage.model).toBe(1);
-      // No probe handles judgement in this version, and the run says so rather than implying clean.
-      expect(all.skipped).toEqual([
-        { probe: 'judgement rules', reason: 'no probe in this version handles this kind' },
-      ]);
+      // The judgement probe runs, finds no credentials, and SAYS SO — a skip with a reason is
+      // what lets an agent tell "not judged" apart from "judged and clean".
+      expect(all.skipped).toHaveLength(1);
+      expect(all.skipped[0].probe).toBe('judgement');
+      expect(all.skipped[0].reason).toContain('no ANTHROPIC_API_KEY');
 
+      // --only deterministic never reaches the model tier at all, so there is nothing to skip.
       const only = JSON.parse(
         archcheck(['--cwd', root, '--only', 'deterministic', '--format', 'json']).stdout,
       );
@@ -498,7 +505,12 @@ describe('SARIF and coverage, end to end (plans 18-19)', () => {
       statement: 'a controller decides nothing',
       severity: 'advisory' as const,
       confidence: 'model' as const,
-      params: { statement: 'no business branch', appliesTo: 'modules/**' },
+      params: {
+        statement: 'A controller must not decide a business outcome.',
+        appliesTo: 'modules/**',
+        examples: { pass: ['return decide(x);'], fail: ['if (a > b) return "no";'] },
+        cite: 'the deciding branch',
+      },
       remedy: { summary: 'move the branch into the domain' },
     },
   ],

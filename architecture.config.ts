@@ -159,6 +159,7 @@ export default defineArchitecture({
         name: 'probe',
         match: 'src/probes/**',
         mayImport: ['kernel', 'util', 'contract', 'graph', 'fs'],
+        // The judgement probe lives at src/probes/model/**, which this glob already covers.
       },
       remedy: { summary: "return a RawFinding and let the kind's explain() write the sentence" },
     },

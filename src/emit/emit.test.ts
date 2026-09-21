@@ -203,19 +203,21 @@ describe('the id ledger', () => {
 describe('an unimplemented kind', () => {
   test('is reported rather than silently emitting nothing', () => {
     inTempRepo((root) => {
-      const withJudgement: Rule[] = [
+      // Every kind in the closed set of eight now has a contract type except `forbidden`, which
+      // is a one-edge special case `layers` already covers.
+      const withUnimplemented: Rule[] = [
         ...RULES,
         {
-          id: 'controllers-stay-thin',
-          kind: 'judgement',
-          statement: 'a controller decides nothing',
-          severity: 'advisory',
-          confidence: 'model',
-          params: { statement: 'no business branch', appliesTo: 'routes/**' },
-          remedy: { summary: 'move the branch into the domain' },
+          id: 'one-specific-edge',
+          kind: 'forbidden',
+          statement: 'this one edge is banned',
+          severity: 'error',
+          confidence: 'deterministic',
+          params: { from: 'a/**', to: 'b/**' },
+          remedy: { summary: 'do not import it' },
         },
       ];
-      expect(plan(root, withJudgement).unimplemented).toEqual(['judgement']);
+      expect(plan(root, withUnimplemented).unimplemented).toEqual(['forbidden']);
     });
   });
 });
