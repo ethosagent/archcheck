@@ -1,0 +1,228 @@
+/**
+ * `archcheck init` — write a starting manifest from the folder structure.
+ *
+ * This lives in its own layer rather than in `src/cli/`, because the CLI owns no behaviour: every
+ * capability has to be reachable programmatically, since the agent hook does not shell out.
+ * archcheck's own self-host run caught it sitting in the wrong place.
+ *
+ * Why this arrives last and not first: on a greenfield repository inference has nothing to read.
+ * By now archcheck has a graph reader, so it can infer the layers a codebase ALREADY has and the
+ * imports it ALREADY makes — which is a starting point somebody can tighten, rather than a blank
+ * file (plan 23).
+ *
+ * Two deliberate properties of the output:
+ *
+ *   EVERY RULE IS `warn`. Day one is green. Nothing about this file is a claim that the code is
+ *   correct — it is a description of what the code currently does, and the work is promoting rules
+ *   to `error` one at a time, each with a fixture.
+ *
+ *   `mayImport` DESCRIBES, it does not prescribe. It lists the layers each layer imports today. A
+ *   generated manifest that forbade everything would produce hundreds of findings on the first run
+ *   and be deleted the same afternoon.
+ */
+import { readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { readGraph } from '../graph/index.js';
+import { err, ok, type Result } from '../result.js';
+import { repoRelative, toPosix } from '../util/paths.js';
+
+const IGNORED = new Set(['node_modules', '.git', 'dist', 'generated', '.archcheck', 'fixtures']);
+
+/** Directories that look like source roots, in the order a reader would expect. */
+function sourceRoots(root: string): string[] {
+  const candidates = ['src', 'packages', 'modules', 'apps', 'lib'];
+  return candidates.filter((name) => {
+    try {
+      return statSync(join(root, name)).isDirectory();
+    } catch {
+      return false;
+    }
+  });
+}
+
+function subdirectories(root: string, relative: string): string[] {
+  try {
+    return readdirSync(join(root, relative))
+      .filter((name) => !IGNORED.has(name))
+      .filter((name) => {
+        try {
+          return statSync(join(root, relative, name)).isDirectory();
+        } catch {
+          return false;
+        }
+      })
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+type CandidateLayer = { name: string; match: string };
+
+export function inferLayers(root: string): CandidateLayer[] {
+  const roots = sourceRoots(root);
+  if (roots.length === 0) return [];
+
+  const layers: CandidateLayer[] = [];
+  for (const sourceRoot of roots) {
+    const children = subdirectories(root, sourceRoot);
+    if (children.length === 0) {
+      layers.push({ name: sourceRoot, match: `${sourceRoot}/**` });
+      continue;
+    }
+    for (const child of children) {
+      layers.push({ name: child, match: `${sourceRoot}/${child}/**` });
+    }
+  }
+  return layers;
+}
+
+function layerOfPath(layers: readonly CandidateLayer[], relative: string): string | undefined {
+  // Longest prefix wins, so a nested folder is attributed to the most specific layer.
+  let best: { name: string; length: number } | undefined;
+  for (const layer of layers) {
+    const prefix = layer.match.replace(/\*\*$/, '');
+    if (relative.startsWith(prefix) && (best === undefined || prefix.length > best.length)) {
+      best = { name: layer.name, length: prefix.length };
+    }
+  }
+  return best?.name;
+}
+
+export type InitPlan = { source: string; layerCount: number; observedEdges: number };
+
+export function renderManifest(
+  layers: readonly CandidateLayer[],
+  mayImport: ReadonlyMap<string, readonly string[]>,
+): string {
+  const entries = layers.map((layer, index) => {
+    const allowed = [...(mayImport.get(layer.name) ?? [])].sort();
+    const allowedText =
+      allowed.length === 0 ? '[]' : `[${allowed.map((n) => `'${n}'`).join(', ')}]`;
+    return [
+      '    {',
+      `      id: '${layer.name}-imports-only-what-it-declares',`,
+      "      kind: 'layers',",
+      `      statement: '${layer.name} imports only what it declares',`,
+      "      // Generated as 'warn'. Promote to 'error' one rule at a time, each with a fixture.",
+      "      severity: 'warn',",
+      "      confidence: 'deterministic',",
+      '      params: {',
+      `        name: '${layer.name}',`,
+      `        match: '${layer.match}',`,
+      `        // Observed, not prescribed: this is what ${layer.name} imports today. Remove an`,
+      '        // entry to tighten the rule, then fix what it finds.',
+      `        mayImport: ${allowedText},`,
+      ...(index === 0
+        ? [
+            '        // Exactly one layers rule owns the unlayered-file report.',
+            '        catchesUnlayered: true,',
+          ]
+        : []),
+      '      },',
+      `      remedy: { summary: 'declare the dependency, or invert the call' },`,
+      '    },',
+    ].join('\n');
+  });
+
+  return [
+    '/**',
+    ' * GENERATED BY `archcheck init` — then edited by you.',
+    ' *',
+    ' * This file describes the architecture your code has TODAY. Every rule is `warn`, so the',
+    ' * first run is green. The work is to tighten it:',
+    ' *',
+    ' *   1. Remove a `mayImport` entry that should not be there.',
+    ' *   2. Run `npx archcheck` and read what it finds.',
+    ' *   3. Fix the code, or record the debt with `npx archcheck baseline --write`.',
+    ' *   4. Promote that one rule to `severity: error`, and add its fixture.',
+    ' *',
+    ' * Repeat. One rule at a time is the point — a manifest switched on all at once gets reverted.',
+    ' */',
+    "import { defineArchitecture } from 'archcheck';",
+    '',
+    'export default defineArchitecture({',
+    '  rules: [',
+    ...entries,
+    '',
+    '    // Four bans that are worth having in every repository. Tighten `appliesTo` to match',
+    '    // your entry points, then promote them to `error`.',
+    '    {',
+    "      id: 'no-computed-dynamic-import',",
+    "      kind: 'banned-syntax',",
+    "      statement: 'a dynamic import names its module literally, so the graph stays complete',",
+    "      severity: 'warn',",
+    "      confidence: 'deterministic',",
+    "      params: { appliesTo: '**/*.ts', selector: 'computed-dynamic-import' },",
+    "      remedy: { summary: 'import the candidates statically and pick between them' },",
+    '    },',
+    '    {',
+    "      id: 'no-empty-catch',",
+    "      kind: 'banned-syntax',",
+    "      statement: 'a caught error is handled, rethrown, or its silence is explained',",
+    "      severity: 'warn',",
+    "      confidence: 'deterministic',",
+    "      params: { appliesTo: '**/*.ts', selector: 'empty-catch' },",
+    "      remedy: { summary: 'handle it, rethrow it, or say in a comment why ignoring is safe' },",
+    '    },',
+    '    {',
+    "      id: 'no-inline-suppression',",
+    "      kind: 'banned-syntax',",
+    "      statement: 'an exception lives in the manifest with an owner and an expiry, never inline',",
+    "      severity: 'warn',",
+    "      confidence: 'proxy',",
+    "      params: { appliesTo: '**/*.ts', selector: 'suppression-comment' },",
+    "      remedy: { summary: 'add an exception to this file, with an owner and an expiry' },",
+    '    },',
+    '    {',
+    "      id: 'no-console-outside-an-entry-point',",
+    "      kind: 'banned-syntax',",
+    "      statement: 'logging goes through one seam, never straight to the console',",
+    "      severity: 'warn',",
+    "      confidence: 'deterministic',",
+    "      params: { appliesTo: '**/*.ts', selector: 'member-access', target: 'console' },",
+    "      remedy: { summary: 'inject a logger, or list this path as an entry point in appliesTo' },",
+    '    },',
+    '  ],',
+    '});',
+    '',
+  ].join('\n');
+}
+
+export function buildInitManifest(root: string, tsconfigPath: string): Result<string> {
+  const layers = inferLayers(root);
+  if (layers.length === 0) {
+    return err([
+      'found no source directory to infer layers from',
+      '  → archcheck init looks for src/, packages/, modules/, apps/ or lib/',
+    ]);
+  }
+
+  const mayImport = new Map<string, Set<string>>();
+  for (const layer of layers) mayImport.set(layer.name, new Set());
+
+  // The graph is optional here on purpose: without a tsconfig we can still name the layers, and a
+  // manifest with empty allow-lists at `warn` is a usable starting point that says what it is.
+  const graph = readGraph({ root, tsconfigPath, cache: false });
+  if (graph.ok) {
+    for (const edge of graph.value.edges) {
+      if (edge.external) continue;
+      const from = layerOfPath(layers, repoRelative(root, edge.from));
+      const to = layerOfPath(layers, repoRelative(root, edge.to));
+      if (from === undefined || to === undefined || from === to) continue;
+      mayImport.get(from)?.add(to);
+    }
+  }
+
+  const frozen = new Map<string, readonly string[]>(
+    [...mayImport.entries()].map(([name, set]) => [name, [...set]]),
+  );
+  return ok(renderManifest(layers, frozen));
+}
+
+export function initSummary(root: string, layers: readonly CandidateLayer[]): string[] {
+  return [
+    `inferred ${layers.length} layer(s) from ${toPosix(root)}:`,
+    ...layers.map((layer) => `  ${layer.name.padEnd(20)} ${layer.match}`),
+  ];
+}

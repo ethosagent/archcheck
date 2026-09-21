@@ -350,6 +350,14 @@ export function describeViolations(ruleId: string, diagnostics: readonly Diagnos
  * A stale baseline (exit 4) outranks live violations for the same reason: the fix is
  * `baseline --prune`, and reporting exit 1 would send an agent to edit code that is already right.
  */
+export {
+  buildInitManifest,
+  inferLayers,
+  initSummary,
+  renderManifest,
+} from './init/index.js';
+export { CONFIG_FILENAME } from './registry/index.js';
+
 export function exitCodeFor(result: RunResult): ExitCode {
   if (result.exceptions.some((exception) => exception.expired)) return EXIT.config;
   if (result.baselineStale.length > 0) return EXIT.baselineStale;

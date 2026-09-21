@@ -10,7 +10,15 @@ import type { ReporterName } from '../report/index.js';
 import { err, ok, type Result } from '../result.js';
 import type { Confidence } from '../types.js';
 
-export type Command = 'check' | 'emit' | 'explain' | 'coverage' | 'baseline' | 'version' | 'help';
+export type Command =
+  | 'check'
+  | 'emit'
+  | 'explain'
+  | 'coverage'
+  | 'baseline'
+  | 'init'
+  | 'version'
+  | 'help';
 
 export type ParsedArgs = {
   command: Command;
@@ -19,6 +27,8 @@ export type ParsedArgs = {
   /** `--changed` with no value means "ask git". */
   changed?: readonly string[];
   emitCheck: boolean;
+  /** `init --force`: overwrite an existing manifest. */
+  force: boolean;
   /** `baseline --write` or `baseline --prune`. */
   baselineMode?: 'write' | 'prune';
   showBaselined: boolean;
@@ -61,6 +71,7 @@ export const HELP = `archcheck — architecture conformance, declared once and c
   archcheck coverage             the three counts, computed from the manifest
   archcheck baseline --write     record today's violations as pre-existing debt
   archcheck baseline --prune     drop entries that no longer reproduce
+  archcheck init                 write a starting architecture.config.ts from the folders
   archcheck --version
 
 exit codes
@@ -98,6 +109,7 @@ export function parseArgs(argv: readonly string[]): Result<ParsedArgs> {
     command: 'check',
     format: 'terminal',
     emitCheck: false,
+    force: false,
     showBaselined: false,
     ingestGraph: false,
     writeGraph: false,
@@ -110,7 +122,7 @@ export function parseArgs(argv: readonly string[]): Result<ParsedArgs> {
   // The subcommand is recognised WHEREVER it appears, not only at argv[0]. `--cwd x baseline
   // --write` is a perfectly natural thing to type, and a parser that silently rejected it read
   // as "unexpected argument 'baseline'" — which names the wrong thing.
-  const COMMANDS = new Set(['check', 'emit', 'explain', 'coverage', 'baseline']);
+  const COMMANDS = new Set(['check', 'emit', 'explain', 'coverage', 'baseline', 'init']);
 
   while (rest.length > 0) {
     const arg = rest.shift() as string;
@@ -174,6 +186,9 @@ export function parseArgs(argv: readonly string[]): Result<ParsedArgs> {
       case '--prune':
         parsed.baselineMode = 'prune';
         break;
+      case '--force':
+        parsed.force = true;
+        break;
       case '--show-baselined':
         parsed.showBaselined = true;
         break;
@@ -211,6 +226,9 @@ export function parseArgs(argv: readonly string[]): Result<ParsedArgs> {
   }
   if (parsed.baselineMode !== undefined && parsed.command !== 'baseline') {
     errors.push('--write and --prune apply to `archcheck baseline` only');
+  }
+  if (parsed.force && parsed.command !== 'init') {
+    errors.push('--force applies to `archcheck init` only');
   }
   if (parsed.command === 'baseline' && parsed.baselineMode === undefined) {
     errors.push(

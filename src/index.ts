@@ -8,14 +8,19 @@
 export {
   type ArchCheck,
   type BaselineOutcome,
+  buildInitManifest,
   type CheckOptions,
+  CONFIG_FILENAME,
   describeViolations,
   type EmitResult,
   EXIT,
   type ExitCode,
   exitCodeFor,
+  inferLayers,
+  initSummary,
   type LoadOptions,
   load,
+  renderManifest,
 } from './archcheck.js';
 export {
   BASELINE_PATH,

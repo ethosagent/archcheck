@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { EXIT, type ExitCode, exitCodeFor, load } from '../archcheck.js';
 /**
  * The command surface. Thin by construction: parse args → one ArchCheck method → a reporter.
  *
@@ -9,6 +8,18 @@ import { EXIT, type ExitCode, exitCodeFor, load } from '../archcheck.js';
  *
  * This is an app entry point — the one place allowed to write to the console (PROD-1).
  */
+import { existsSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  buildInitManifest,
+  CONFIG_FILENAME,
+  EXIT,
+  type ExitCode,
+  exitCodeFor,
+  inferLayers,
+  initSummary,
+  load,
+} from '../archcheck.js';
 import { automatablePercent, MARK } from '../coverage/index.js';
 import { describeStale } from '../emit/write.js';
 import { reporterFor } from '../report/index.js';
@@ -78,6 +89,30 @@ async function runEmit(args: ParsedArgs, cwd: string): Promise<ExitCode> {
   return EXIT.clean;
 }
 
+function runInit(args: ParsedArgs, cwd: string): ExitCode {
+  const configPath = join(cwd, CONFIG_FILENAME);
+  if (existsSync(configPath) && !args.force) {
+    return fail(
+      [
+        `${CONFIG_FILENAME} already exists — archcheck init will not overwrite your manifest`,
+        '  → pass --force if you really mean to replace it',
+      ],
+      EXIT.config,
+    );
+  }
+
+  const built = buildInitManifest(cwd, join(cwd, 'tsconfig.json'));
+  if (!built.ok) return fail(built.error, EXIT.config);
+
+  writeFileSync(configPath, built.value);
+  for (const line of initSummary(cwd, inferLayers(cwd))) console.log(line);
+  console.log('');
+  console.log(`wrote ${CONFIG_FILENAME} — every rule is 'warn', so the first run is green`);
+  console.log('  next: npx archcheck          see what it observes');
+  console.log('        npx archcheck emit     write the generated configs');
+  return EXIT.clean;
+}
+
 async function runBaseline(args: ParsedArgs, cwd: string): Promise<ExitCode> {
   const loaded = load({ cwd });
   if (!loaded.ok) return fail(loaded.error, EXIT.config);
@@ -137,6 +172,8 @@ export async function main(argv: readonly string[]): Promise<ExitCode> {
       return runCoverage(cwd);
     case 'baseline':
       return runBaseline(args, cwd);
+    case 'init':
+      return runInit(args, cwd);
     case 'check':
       return runCheck(args, cwd);
   }

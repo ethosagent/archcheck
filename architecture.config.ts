@@ -74,6 +74,13 @@ export default defineArchitecture({
     },
     {
       ...law,
+      id: 'init-infers-and-writes-nothing-else',
+      statement: 'init reads the folder structure and the graph, and runs no rule',
+      params: { name: 'init', match: 'src/init/**', mayImport: ['kernel', 'util', 'graph'] },
+      remedy: { summary: 'infer it from what the code already does; do not evaluate a rule here' },
+    },
+    {
+      ...law,
       id: 'the-baseline-is-a-leaf',
       statement: 'the baseline reads and writes one file and knows nothing about rules',
       params: { name: 'baseline', match: 'src/baseline/**', mayImport: ['kernel'] },
@@ -184,6 +191,7 @@ export default defineArchitecture({
           'exception',
           'fs',
           'coverage',
+          'init',
         ],
         catchesUnlayered: true,
       },
