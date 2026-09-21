@@ -176,3 +176,27 @@ describe('ingest', () => {
     );
   });
 });
+
+describe('every rule the fixture declares actually fires', () => {
+  /**
+   * A rule that matches nothing passes every build and looks exactly like compliance (plan 12).
+   * This is the check that catches it: the lint fixture declares nine rules, and all nine must
+   * have something to find. It caught a real regression — fixing the empty-catch false positive
+   * made the fixture's catch an explained silence, so that rule quietly stopped firing.
+   */
+  test('all nine rules in the lint fixture have a planted violation', async () => {
+    const { loadManifestFrom } = await import('../registry/load.js');
+    const loaded = loadManifestFrom(join(ROOT, 'architecture.config.ts'));
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+
+    const declared = loaded.value.manifest.rules.filter((rule) => rule.severity !== 'off');
+    const findings = await probe.run(ctx({ rules: declared }));
+    if (!Array.isArray(findings)) throw new Error('the probe skipped');
+
+    const fired = new Set(findings.map((finding) => finding.ruleId));
+    const silent = declared.map((rule) => rule.id).filter((id) => !fired.has(id));
+    expect(silent).toEqual([]);
+    expect(fired.size).toBe(9);
+  });
+});

@@ -15,12 +15,12 @@ export function byName(kind: string): boolean {
   return kind === 'stock-market';
 }
 
+// no empty catch — the braces are genuinely empty, because a catch holding only a comment is an
+// EXPLAINED silence that this rule deliberately allows.
 export function swallow(): void {
   try {
     staleness();
-  } catch {
-    // no empty catch
-  }
+  } catch {}
 }
 
 // no inline suppression comment
