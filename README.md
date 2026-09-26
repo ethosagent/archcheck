@@ -350,7 +350,9 @@ exceptions: [
 ```
 
 An exception needs an owner, a date and a reason. archcheck reports every exception on every run,
-and it reports the ones that expire within 30 days.
+and it reports the ones that expire within 30 days. `--show-baselined` lists each one with the
+path it covers. In `--format json`, each entry in `exceptions` carries that `path` exactly as the
+manifest wrote it.
 
 After the date, the run fails and names the owner. An exception that nobody has to justify again is
 a rule that somebody deleted quietly.

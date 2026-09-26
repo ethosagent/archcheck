@@ -150,6 +150,12 @@ export type BaselineEntry = {
 /** A declared allowance, as the run sees it once today's date is known. */
 export type ExceptionStatus = {
   ruleId: string;
+  /**
+   * The path glob(s) it covers, exactly as the manifest wrote them. Absent for an exception pinned
+   * by `identity` alone. Without it a consumer cannot tell which file an exception covers short of
+   * parsing the prose reason. Copied by `applyExceptions` (src/exceptions/index.ts).
+   */
+  path?: string | string[];
   owner: string;
   expires: string;
   expired: boolean;

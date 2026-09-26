@@ -137,6 +137,9 @@ export function applyExceptions(
     const daysLeft = daysBetween(today, exception.expires);
     return {
       ruleId: exception.rule,
+      // Spread, not assigned: an identity-pinned exception gets no `path` key rather than an
+      // undefined one.
+      ...(exception.path === undefined ? {} : { path: exception.path }),
       owner: exception.owner,
       expires: exception.expires,
       // The expiry date itself is the last day it holds, so "expired" means strictly past it.

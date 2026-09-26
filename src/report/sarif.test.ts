@@ -195,6 +195,25 @@ describe('our extras survive in properties', () => {
   });
 });
 
+describe('declared exceptions', () => {
+  test('ride on the invocation with the path each one covers', () => {
+    const exception = {
+      ruleId: 'domain-no-service-import',
+      path: 'modules/ledger/**',
+      owner: 'mitesh',
+      expires: '2099-12-31',
+      expired: false,
+      daysLeft: 20_000,
+      reason: 'legacy',
+      suppressed: 1,
+    };
+    const sarif = toSarif({ ...RESULT, exceptions: [exception] }, {}) as {
+      runs: { invocations: { properties: { exceptions: { path?: unknown }[] } }[] }[];
+    };
+    expect(sarif.runs[0]?.invocations[0]?.properties.exceptions[0]?.path).toBe('modules/ledger/**');
+  });
+});
+
 describe('suppressed findings', () => {
   test('are reported as SARIF suppressions rather than silently dropped', () => {
     const sarif = toSarif(RESULT, {}) as { runs: { results: Record<string, unknown>[] }[] };

@@ -120,6 +120,24 @@ describe('always visible', () => {
     expect(statuses[0]?.suppressed).toBe(0);
   });
 
+  test('each status carries the path it covers, exactly as the manifest wrote it', () => {
+    // Without it a consumer of `--format json` cannot tell which file an exception covers short of
+    // parsing the prose reason.
+    const statuses = applyExceptions(
+      [
+        exception(),
+        exception({ path: ['modules/a/**', 'modules/b.ts'] }),
+        exception({ path: undefined, identity: 'aaaaaaaaaaaaaaaa' }),
+      ],
+      [],
+      '2026-09-21',
+    ).statuses;
+    expect(statuses[0]?.path).toBe('modules/graph/**');
+    expect(statuses[1]?.path).toEqual(['modules/a/**', 'modules/b.ts']);
+    // An identity-pinned exception has no path, and the key is absent rather than invented.
+    expect(statuses[2] !== undefined && 'path' in statuses[2]).toBe(false);
+  });
+
   test('the suppressed count is real', () => {
     const two = [diagnostic(), diagnostic({ identity: 'bbbbbbbbbbbbbbbb' })];
     expect(applyExceptions([exception()], two, '2026-09-21').statuses[0]?.suppressed).toBe(2);

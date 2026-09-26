@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { Diagnostic, RunResult } from '../types.js';
+import type { Diagnostic, ExceptionStatus, RunResult } from '../types.js';
 import { SCHEMA_VERSION } from '../version.js';
 import { reporterFor, reporterNames } from './index.js';
 import { toJsonReport } from './json.js';
@@ -61,6 +61,28 @@ const FIXED: RunResult = {
   exceptions: [],
 };
 
+const EXPIRED: ExceptionStatus = {
+  ruleId: 'domain-no-service-import',
+  path: 'modules/ledger/**',
+  owner: 'mitesh',
+  expires: '2020-01-01',
+  expired: true,
+  daysLeft: -100,
+  reason: 'expired on purpose',
+  suppressed: 0,
+};
+
+const ACTIVE: ExceptionStatus = {
+  ruleId: 'controllers-stay-thin',
+  path: ['src/legacy/a.ts', 'src/legacy/b.ts'],
+  owner: 'mitesh',
+  expires: '2099-12-31',
+  expired: false,
+  daysLeft: 20_000,
+  reason: 'legacy controllers, removed with the old API',
+  suppressed: 2,
+};
+
 describe('terminal reporter', () => {
   test('groups by confidence, deterministic first, and shows the remedy', async () => {
     const text = await reporterFor('terminal').report(FIXED, { noColor: true });
@@ -118,6 +140,28 @@ describe('terminal reporter', () => {
     expect(text).toContain('nothing to fix');
   });
 
+  test('an expired exception names the path it covered', async () => {
+    const result: RunResult = { ...FIXED, exceptions: [EXPIRED] };
+    const text = (await reporterFor('terminal').report(result, { noColor: true })) as string;
+    expect(text).toContain(
+      '✗ exception expired 2020-01-01 for domain-no-service-import (modules/ledger/**) — owner mitesh',
+    );
+  });
+
+  test('--show-baselined lists each active exception with its path; the default only counts', async () => {
+    const result: RunResult = { ...FIXED, exceptions: [ACTIVE, EXPIRED] };
+    const quiet = (await reporterFor('terminal').report(result, { noColor: true })) as string;
+    expect(quiet).toContain('1 exception(s) active');
+    expect(quiet).not.toContain('src/legacy/a.ts');
+    const shown = (await reporterFor('terminal').report(result, {
+      noColor: true,
+      showBaselined: true,
+    })) as string;
+    expect(shown).toContain(
+      'controllers-stay-thin  src/legacy/a.ts, src/legacy/b.ts  owner mitesh, expires 2099-12-31, suppressed 2',
+    );
+  });
+
   test('colour is opt-out, and noColor really removes every escape', async () => {
     const plain = (await reporterFor('terminal').report(FIXED, { noColor: true })) as string;
     const coloured = (await reporterFor('terminal').report(FIXED, { noColor: false })) as string;
@@ -134,6 +178,15 @@ describe('json reporter', () => {
     expect(parsed.coverage).toEqual(FIXED.coverage);
     expect(parsed.skipped).toEqual(FIXED.skipped);
     expect(parsed.ok).toBe(false);
+  });
+
+  test('each exception carries its path', async () => {
+    const result: RunResult = { ...FIXED, exceptions: [ACTIVE, EXPIRED] };
+    const parsed = JSON.parse((await reporterFor('json').report(result, {})) as string);
+    expect(parsed.exceptions.map((e: ExceptionStatus) => e.path)).toEqual([
+      ['src/legacy/a.ts', 'src/legacy/b.ts'],
+      'modules/ledger/**',
+    ]);
   });
 
   test('always carries schemaVersion', async () => {

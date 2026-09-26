@@ -483,7 +483,7 @@ describe('exceptions', () => {
     const { code, stdout } = archcheck([], fixture('expired-exception'));
     // Exit 2, not 1: the fix is a manifest edit — extend it or delete it — not a code edit.
     expect(code).toBe(2);
-    expect(stdout).toContain('exception expired 2020-01-01');
+    expect(stdout).toContain('exception expired 2020-01-01 for rules-are-pure (src/rules/**)');
     expect(stdout).toContain('owner mitesh');
   });
 
@@ -491,7 +491,12 @@ describe('exceptions', () => {
     const json = JSON.parse(archcheck(['--format', 'json'], fixture('expired-exception')).stdout);
     expect(json.diagnostics).toHaveLength(1);
     expect(json.diagnostics[0].exempted).toBe(false);
-    expect(json.exceptions[0]).toMatchObject({ expired: true, suppressed: 0, owner: 'mitesh' });
+    expect(json.exceptions[0]).toMatchObject({
+      expired: true,
+      suppressed: 0,
+      owner: 'mitesh',
+      path: 'src/rules/**',
+    });
   });
 
   test('an exception with no owner fails validation at exit 2', () => {

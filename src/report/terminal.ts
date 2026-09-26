@@ -8,7 +8,7 @@
  * What a caller must know: the remedy is not optional decoration. A finding that says only what
  * failed makes the reader guess; one that says what to do next closes the ticket.
  */
-import type { Confidence, Diagnostic, RunResult } from '../types.js';
+import type { Confidence, Diagnostic, ExceptionStatus, RunResult } from '../types.js';
 import { CONFIDENCE_ORDER, type ReportCtx, type Reporter, visible } from './types.js';
 
 const MARK: Record<Confidence, string> = { deterministic: '✗', proxy: '◑', model: '○' };
@@ -64,6 +64,12 @@ function renderOne(diagnostic: Diagnostic, dim: Paint): string[] {
   return lines;
 }
 
+/** What an exception covers, for a person: its globs, or that it pins one finding by identity. */
+function scopeOf(exception: ExceptionStatus): string {
+  if (exception.path === undefined) return 'one finding, pinned by identity';
+  return typeof exception.path === 'string' ? exception.path : exception.path.join(', ');
+}
+
 export function createTerminalReporter(): Reporter {
   return {
     name: 'terminal',
@@ -115,10 +121,21 @@ export function createTerminalReporter(): Reporter {
             `  ${active} exception(s) active${expiringSoon > 0 ? `, ${expiringSoon} expiring within 30 days` : ''}`,
           ),
         );
+        // The count alone by default; the same flag that shows suppressed findings shows what each
+        // exception covers, so the default output does not grow a line per exception.
+        if (ctx.showBaselined === true) {
+          for (const active of result.exceptions.filter((e) => !e.expired)) {
+            out.push(
+              dim(
+                `    ${active.ruleId}  ${scopeOf(active)}  owner ${active.owner}, expires ${active.expires}, suppressed ${active.suppressed}`,
+              ),
+            );
+          }
+        }
         for (const expired of result.exceptions.filter((e) => e.expired)) {
           out.push(
             red(
-              `  ✗ exception expired ${expired.expires} for ${expired.ruleId} — owner ${expired.owner}`,
+              `  ✗ exception expired ${expired.expires} for ${expired.ruleId} (${scopeOf(expired)}) — owner ${expired.owner}`,
             ),
           );
         }
