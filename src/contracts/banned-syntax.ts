@@ -133,32 +133,49 @@ function scanAst(
 }
 
 /**
- * Comment trivia only, via the compiler's own scanner.
+ * Comment trivia only, read from the parsed AST rather than a hand-driven scanner.
  *
  * Reading raw lines instead looks equivalent and is not: it matches the words wherever they appear,
  * including inside the very pattern above. That false positive is how this function was found — by
  * archcheck flagging this file on its first self-host run.
+ *
+ * A bare `ts.createScanner` is not enough either. Whether `}` resumes a template and whether `/`
+ * opens a regex depends on the grammar, which only the parser knows; a scanner driven without it
+ * mis-tokenized everything after the first `${...}` substitution, and 0.2.0 missed every later
+ * comment. So walk every TOKEN of the tree the parser already built: every comment is trivia
+ * in front of exactly one token (the last ones in front of the end-of-file token), so reading each
+ * token's comment ranges finds all of them, once each. Pinned by the template, nested-template and
+ * regex cases in banned-syntax.test.ts.
  */
 function scanComments(source: ts.SourceFile, found: BannedOccurrence[]): void {
   const text = source.getFullText();
-  const scanner = ts.createScanner(
-    ts.ScriptTarget.Latest,
-    false,
-    ts.LanguageVariant.Standard,
-    text,
-  );
-  for (let token = scanner.scan(); token !== ts.SyntaxKind.EndOfFileToken; token = scanner.scan()) {
-    if (
-      token !== ts.SyntaxKind.SingleLineCommentTrivia &&
-      token !== ts.SyntaxKind.MultiLineCommentTrivia
-    ) {
-      continue;
+  const seen = new Set<number>();
+  const visit = (node: ts.Node): void => {
+    // A JSDoc node's range lies INSIDE a comment, and JSX text is text, not trivia. Neither has
+    // leading comments of its own; the JSDoc comment itself is the next token's leading trivia.
+    if (ts.isJSDoc(node) || node.kind === ts.SyntaxKind.JsxText) return;
+    const children = node.getChildren(source);
+    if (children.length > 0) {
+      for (const child of children) visit(child);
+      return;
     }
-    const comment = scanner.getTokenText();
-    if (!SUPPRESSION.test(comment)) continue;
-    const { line, character } = source.getLineAndCharacterOfPosition(scanner.getTokenStart());
-    found.push({ line: line + 1, col: character + 1, snippet: comment.trim().slice(0, 60) });
-  }
+    // The compiler splits one token's trivia in two: comments on the line the previous token
+    // ended on are "trailing", the rest "leading". Both halves, or a suppression written at the
+    // end of a code line goes unseen. At position 0 the two overlap, hence `seen`.
+    const ranges = [
+      ...(ts.getTrailingCommentRanges(text, node.pos) ?? []),
+      ...(ts.getLeadingCommentRanges(text, node.pos) ?? []),
+    ];
+    for (const range of ranges) {
+      if (seen.has(range.pos)) continue;
+      seen.add(range.pos);
+      const comment = text.slice(range.pos, range.end);
+      if (!SUPPRESSION.test(comment)) continue;
+      const { line, character } = source.getLineAndCharacterOfPosition(range.pos);
+      found.push({ line: line + 1, col: character + 1, snippet: comment.trim().slice(0, 60) });
+    }
+  };
+  visit(source);
 }
 
 /**

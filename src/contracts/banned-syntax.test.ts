@@ -11,6 +11,8 @@ import {
 
 /** The text of a computed dynamic import, built rather than written, so it is not a template. */
 const COMPUTED_SPECIFIER = ['`./', '${', 'x}.js`'].join('');
+/** A template substitution opener, built for the same reason. */
+const SUB = ['$', '{'].join('');
 
 function parse(source: string): ts.SourceFile {
   return ts.createSourceFile('sample.ts', source, ts.ScriptTarget.Latest, true);
@@ -128,6 +130,53 @@ describe('suppression-comment', () => {
     const literal = 'export const PATTERN = /(eslint-disable|biome-ignore)/;\n';
     expect(occurrences(params, literal)).toHaveLength(0);
     expect(occurrences(params, 'export const s = "biome-ignore";\n')).toHaveLength(0);
+  });
+
+  test('a template literal with a substitution does not hide every comment after it', () => {
+    // The 0.2.0 bug: a raw scanner never rescans the `}` that closes a substitution as template
+    // text, so everything after the first one was mis-tokenized and no later comment was found.
+    const source = [
+      '// biome-ignore lint/a: before',
+      `export const a = (x: string) => \`id-${SUB}x}-end\`;`,
+      '// biome-ignore lint/b: after',
+      'export const b = 1; // eslint-disable-line no-x',
+      '',
+    ].join('\n');
+    expect(occurrences(params, source).map((o) => o.line)).toEqual([1, 3, 4]);
+  });
+
+  test('a nested template does not hide a later comment either', () => {
+    const source = [
+      `export const a = (x: string) => \`outer ${SUB}\`inner ${SUB}x}\`} tail\`;`,
+      '/* @ts-ignore */ export const b = 1;',
+      '',
+    ].join('\n');
+    expect(occurrences(params, source).map((o) => o.line)).toEqual([2]);
+  });
+
+  test('comment-shaped text INSIDE a template is not a comment', () => {
+    const source = [
+      'export const a = `// biome-ignore in a plain template`;',
+      `export const b = (x: string) => \`head // eslint-disable ${SUB}x} tail /* @ts-ignore */\`;`,
+      '',
+    ].join('\n');
+    expect(occurrences(params, source)).toHaveLength(0);
+  });
+
+  test('a regex literal containing // is not a comment, and does not hide a later one', () => {
+    const source = [
+      'export const r = /[//] biome-ignore/;',
+      '// biome-ignore lint/c: real',
+      'export const c = 1;',
+      '',
+    ].join('\n');
+    expect(occurrences(params, source).map((o) => o.line)).toEqual([2]);
+  });
+
+  test('JSX text that looks like a comment is not one', () => {
+    const source = 'export const e = <p>// biome-ignore is text here</p>;\n';
+    const tsx = ts.createSourceFile('sample.tsx', source, ts.ScriptTarget.Latest, true);
+    expect(findBannedOccurrences(params, tsx, [])).toHaveLength(0);
   });
 });
 
