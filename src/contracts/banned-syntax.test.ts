@@ -61,6 +61,37 @@ describe('member-access', () => {
     );
     expect(found).toHaveLength(2);
   });
+
+  test('one access chain is one occurrence, however much longer than the target it is', () => {
+    // The 0.2.0 bug: `process.env.B.C` matched as itself AND as its inner `process.env.B` and
+    // `process.env`, because each is a PropertyAccessExpression whose text starts with the target.
+    const env: BannedSyntaxParams = {
+      appliesTo: 'src/**',
+      selector: 'member-access',
+      target: 'process.env',
+    };
+    const found = occurrences(env, 'process.env.A;\nprocess.env.B.C;\n');
+    expect(found.map((o) => o.snippet)).toEqual(['process.env.A', 'process.env.B.C']);
+  });
+
+  test('a call on a longer chain is still one occurrence', () => {
+    const consoleBan: BannedSyntaxParams = {
+      appliesTo: 'src/**',
+      selector: 'member-access',
+      target: 'console',
+    };
+    expect(occurrences(consoleBan, 'console.log(x);\n')).toHaveLength(1);
+    expect(occurrences(consoleBan, 'console.log.call(null, x);\n')).toHaveLength(1);
+  });
+
+  test('an optional-chained member is its own occurrence of the target, not a longer chain', () => {
+    const env: BannedSyntaxParams = {
+      appliesTo: 'src/**',
+      selector: 'member-access',
+      target: 'process.env',
+    };
+    expect(occurrences(env, 'process.env?.A;\n').map((o) => o.snippet)).toEqual(['process.env']);
+  });
 });
 
 describe('new-expression', () => {

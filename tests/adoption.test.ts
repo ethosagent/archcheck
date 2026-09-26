@@ -10,6 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { computeIdentity } from '../src/normalize/identity.js';
 
 const ROOT = join(import.meta.dir, '..');
 const CLI = join(ROOT, 'src', 'cli', 'index.ts');
@@ -156,6 +157,51 @@ export const alsoBad = appendEntry;
       const pruned = archcheck(['baseline', '--prune'], root);
       expect(pruned.code).toBe(0);
       expect(pruned.stdout).toContain('pruned 0 entries');
+      expect(pruned.stdout).toContain('reduced 1 count');
+      expect(archcheck([], root).code).toBe(0);
+    });
+  });
+
+  test('a 0.2.0 baseline that double-counted member-access chains is stale, not failing', () => {
+    inCopyOf('lint', (root) => {
+      // 0.2.0 recorded `console.warn.call` AND its inner `console.warn`, and counted `console.log`
+      // twice here (once inside `console.log.call`). 0.3.0 records one occurrence per chain, so
+      // those numbers come DOWN. That is the prune path (exit 4), never a new violation (exit 1).
+      const file = 'src/rules/chains.ts';
+      writeFileSync(
+        join(root, file),
+        'export function f(): void {\n  console.log.call(null, 1);\n  console.log(2);\n  console.warn.call(null, 3);\n}\n',
+      );
+      expect(archcheck(['baseline', '--write'], root).code).toBe(0);
+
+      // Rewrite the file into what 0.2.0 would have written for the same code.
+      const ruleId = 'no-console-outside-an-entry-point';
+      const id = (snippet: string) =>
+        computeIdentity(ruleId, { file, construct: 'member-access', snippet });
+      const path = join(root, '.archcheck', 'baseline.json');
+      const baseline = JSON.parse(readFileSync(path, 'utf8')) as {
+        version: 1;
+        entries: { identity: string; ruleId: string; occurrences: number }[];
+      };
+      const log = baseline.entries.find((entry) => entry.identity === id('console.log'));
+      expect(log?.occurrences).toBe(1);
+      if (log) log.occurrences = 2;
+      baseline.entries.push({
+        identity: id('console.warn'),
+        ruleId,
+        occurrences: 1,
+        addedAt: '2026-01-01',
+        note: 'pre-existing at adoption',
+      } as (typeof baseline.entries)[number]);
+      writeFileSync(path, `${JSON.stringify(baseline, null, 2)}\n`);
+
+      const stale = archcheck([], root);
+      expect(stale.code).toBe(4);
+      expect(stale.stdout).toContain('archcheck baseline --prune');
+
+      const pruned = archcheck(['baseline', '--prune'], root);
+      expect(pruned.code).toBe(0);
+      expect(pruned.stdout).toContain('pruned 1 entry');
       expect(pruned.stdout).toContain('reduced 1 count');
       expect(archcheck([], root).code).toBe(0);
     });

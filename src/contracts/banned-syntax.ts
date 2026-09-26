@@ -81,9 +81,17 @@ function scanAst(
   const visit = (node: ts.Node): void => {
     switch (params.selector) {
       case 'member-access':
+        // Only the OUTERMOST matching node of a chain: `process.env.A` contains `process.env`,
+        // and both match, so without the parent check one access counted twice (0.2.0). Pinned by
+        // 'one access chain is one occurrence' in banned-syntax.test.ts.
         if (
           ts.isPropertyAccessExpression(node) &&
-          dottedMatches(params.target ?? '', node.getText(source))
+          dottedMatches(params.target ?? '', node.getText(source)) &&
+          !(
+            ts.isPropertyAccessExpression(node.parent) &&
+            node.parent.expression === node &&
+            dottedMatches(params.target ?? '', node.parent.getText(source))
+          )
         ) {
           record(node, node.getText(source));
         } else if (
