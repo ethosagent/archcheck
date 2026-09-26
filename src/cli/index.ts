@@ -227,9 +227,21 @@ export async function main(argv: readonly string[]): Promise<ExitCode> {
 // package, because argv[1] is then the `node_modules/.bin/archcheck` symlink. The CLI silently
 // did nothing and exited 0, so a consumer read "clean" from a check that never ran. A guard that
 // can be wrong about whether to run at all has no place in an entry point.
+//
+// It exits only once stdout and stderr have drained. Node writes to a pipe asynchronously on macOS,
+// and a bare `process.exit` discarded everything still queued past the first 64 KiB, so an agent
+// reading `--format json | …` got invalid JSON while a redirect to a file was complete. An empty
+// write's callback runs after every earlier write on that stream has been handed to the OS. The
+// explicit exit stays, rather than `process.exitCode` alone, so nothing a probe left open can keep
+// the process alive. Pinned by 'output larger than one pipe buffer arrives whole through a pipe'
+// (tests/cli.test.ts).
+function exitWhenFlushed(code: ExitCode): void {
+  process.stdout.write('', () => process.stderr.write('', () => process.exit(code)));
+}
+
 main(process.argv.slice(2))
-  .then((code) => process.exit(code))
+  .then(exitWhenFlushed)
   .catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : String(error));
-    process.exit(EXIT.config);
+    exitWhenFlushed(EXIT.config);
   });

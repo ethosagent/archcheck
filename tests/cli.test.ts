@@ -603,6 +603,47 @@ describe('the published CLI runs when invoked under any name', () => {
     // that may run a full `tsc` build (the on-demand `bun run build` above, for a fresh clone with
     // no dist/) before it does its own work. CI builds dist/ first, so that branch is local-only.
   }, 60000);
+
+  /**
+   * The regression test for truncated piped output. The entry point called `process.exit(code)`
+   * as soon as `main` resolved, and Node writes to a PIPE asynchronously: whatever was still
+   * queued past the first 64 KiB was discarded. A redirect to a file was complete, so the bug hid
+   * from a person and landed on the agent reading `--format json | …`, which got invalid JSON.
+   *
+   * Same constraints as the test above: node and the built dist. And stdout must be a real shell
+   * pipe: through Bun's `execFileSync` the child's stdout is not one that reproduces it, and this
+   * test passed against the broken entry point until it was routed through bash. `PIPESTATUS`
+   * keeps node's exit code rather than `cat`'s. Node writes pipes synchronously on Linux, so on a
+   * Linux runner this passes either way; it is macOS, where agents run it locally, that it guards.
+   */
+  test('output larger than one pipe buffer arrives whole through a pipe', () => {
+    if (!existsSync(DIST_CLI)) {
+      execFileSync('bun', ['run', 'build'], { cwd: ROOT, stdio: 'ignore' });
+    }
+    inCopyOf('layered', (root) => {
+      // Each file is one more domain → service violation, so the report grows well past 64 KiB.
+      for (let index = 0; index < 400; index++) {
+        writeFileSync(
+          join(root, 'modules', 'ledger', 'domain', `reach${index}.ts`),
+          `import { writeEntry } from '../services/write.js';\nexport const reach${index} = writeEntry;\n`,
+        );
+      }
+      const piped = spawnSync(
+        'bash',
+        ['-c', 'node "$0" --format json | cat; exit "$PIPESTATUS"', DIST_CLI],
+        { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+      );
+      if (piped.error) throw piped.error;
+      // The length an unbroken writer produces, computed from what was received: if the pipe cut
+      // the output short, JSON.parse throws before this comparison is reached.
+      const parsed = JSON.parse(piped.stdout);
+      expect(piped.stdout.length).toBeGreaterThan(64 * 1024);
+      expect(piped.stdout).toBe(`${JSON.stringify(parsed)}\n`);
+      expect(parsed.diagnostics.length).toBeGreaterThanOrEqual(400);
+      // The frozen exit code survives the change in how the process ends.
+      expect(piped.status).toBe(1);
+    });
+  }, 60000);
 });
 
 describe('SARIF and coverage, end to end (plans 18-19)', () => {
