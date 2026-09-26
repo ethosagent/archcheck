@@ -10,8 +10,9 @@
  * `model.test.ts` pins both: 'keys on the RULE SET as well as the file', 'keys on the PATH too'.
  */
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { ensureCacheDir } from '../../graph/cache.js';
 import type { JudgeVerdict } from './provider.js';
 
 export const MODEL_CACHE_PATH = '.archcheck/cache/judgement.json';
@@ -70,10 +71,11 @@ export function createVerdictCache(root: string): VerdictCache {
       dirty = true;
     },
     flush() {
-      if (!dirty) return;
       try {
-        mkdirSync(dirname(path), { recursive: true });
-        writeFileSync(path, `${JSON.stringify(next)}\n`);
+        // Before the dirty check, not after it: a warm cache an older version wrote is never
+        // rewritten, so behind the check it would never gain its .gitignore.
+        ensureCacheDir(root);
+        if (dirty) writeFileSync(path, `${JSON.stringify(next)}\n`);
       } catch {
         // A cache we cannot write is a more expensive run, not a failed one.
       }

@@ -12,10 +12,29 @@
  */
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import type { Edge, FileFacts } from './types.js';
 
 export const CACHE_DIR = '.archcheck/cache';
+
+/**
+ * Create the cache directory with a `.gitignore` holding `*` inside it — the pytest and ruff
+ * convention — so a consumer's repo never shows the cache as untracked. 0.2.0 did not, and a
+ * 4.9 MiB facts.json tripped a monorepo's file-size lint. An existing `.gitignore` is never
+ * overwritten (the `wx` flag). Only the cache is ignored: `.archcheck/baseline.json` and
+ * `.archcheck/ids.json` sit outside it and are meant to be committed. Pinned by
+ * src/graph/cache.test.ts. Every writer of the cache directory goes through here.
+ */
+export function ensureCacheDir(root: string): string {
+  const dir = join(root, CACHE_DIR);
+  mkdirSync(dir, { recursive: true });
+  try {
+    writeFileSync(join(dir, '.gitignore'), '*\n', { flag: 'wx' });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+  return dir;
+}
 
 export function hashContent(content: string): string {
   return createHash('sha256').update(content).digest('hex').slice(0, 32);
@@ -76,10 +95,11 @@ export function createFactsCache(root: string, fingerprint: string): FactsCache 
       dirty = true;
     },
     flush() {
-      if (!dirty) return;
       try {
-        mkdirSync(dirname(path), { recursive: true });
-        writeFileSync(path, `${JSON.stringify(next)}\n`);
+        // Before the dirty check, not after it: a warm cache an older version wrote is never
+        // rewritten, so behind the check it would never gain its .gitignore.
+        ensureCacheDir(root);
+        if (dirty) writeFileSync(path, `${JSON.stringify(next)}\n`);
       } catch {
         // A cache we cannot write is a slow run, not a failed one.
       }

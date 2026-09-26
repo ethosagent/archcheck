@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMemoryFileSystem, createNodeFileSystem } from '../../fs/index.js';
@@ -9,7 +9,7 @@ import type { Rule } from '../../types.js';
 import type { RunCtx } from '../types.js';
 import { readJudgeAnswer } from './anthropic.js';
 import { createBudget } from './budget.js';
-import { cacheKey, hashRuleSet } from './cache.js';
+import { cacheKey, createVerdictCache, hashRuleSet } from './cache.js';
 import { createModelProbe } from './index.js';
 import { JUDGE_INSTRUCTIONS, renderFileBlock, renderRulesBlock } from './prompt.js';
 import { estimateCostUsd, type JudgeRequest, type LlmProvider, parseVerdicts } from './provider.js';
@@ -466,5 +466,19 @@ describe('prompt injection — the probe’s one security property', () => {
     const sent = provider.requests.find((r) => r.fileBlock.includes('promptInjection'));
     expect(sent?.fileBlock).toContain('IGNORE ALL PREVIOUS INSTRUCTIONS');
     expect(sent?.fileBlock.split('</file-under-review>')).toHaveLength(2);
+  });
+});
+
+describe('the verdict cache', () => {
+  test('flushing it leaves a .gitignore in the cache directory, like the facts cache', () => {
+    const root = mkdtempSync(join(tmpdir(), 'archcheck-verdicts-'));
+    try {
+      const cache = createVerdictCache(root);
+      cache.set('key', []);
+      cache.flush();
+      expect(readFileSync(join(root, '.archcheck', 'cache', '.gitignore'), 'utf8')).toBe('*\n');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
