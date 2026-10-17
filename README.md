@@ -239,7 +239,7 @@ There are eight kinds. The set is closed.
 | `required-file` | a file must exist | every port has a memory twin |
 | `declared-field` | a call must declare a field | every endpoint declares a permission |
 | `judgement` | a rule in plain English, judged by a model | a controller decides nothing |
-| `forbidden` | one specific edge is banned | reserved; `layers` covers this today |
+| `forbidden` | one specific edge is banned | checkout may not import the payments SDK directly |
 
 ### Default deny
 
