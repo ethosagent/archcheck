@@ -14,7 +14,7 @@ and the percentage goes down, in the same commit.
 
 <!-- archcheck:begin rules-table -->
 
-**24 rules** · ✓ 23 deterministic · ◑ 1 proxy · ○ 0 judgement · **100% automatable**
+**25 rules** · ✓ 24 deterministic · ◑ 1 proxy · ○ 0 judgement · **100% automatable**
 
 | | Rule | Statement | Kind | Severity |
 |---|---|---|---|---|
@@ -25,6 +25,7 @@ and the percentage goes down, in the same commit.
 | ✓ | `every-error-rule-has-a-fixture` | every error-severity rule has a fixture it is proven to catch | required-file | error |
 | ✓ | `exceptions-are-a-leaf` | exceptions decide suppression from paths and dates, and run no check | layers | error |
 | ✓ | `filenames-are-camel-case-or-kebab` | a filename is camelCase, or kebab-case when it names a contract kind | naming | error |
+| ✓ | `fixture-verification-runs-rules-and-declares-none` | fixture verification places a fixture and runs the checks, and declares no rule | layers | error |
 | ✓ | `graph-reports-facts-only` | the graph reader reports facts and evaluates no rule | layers | error |
 | ✓ | `init-infers-and-writes-nothing-else` | init reads the folder structure and the graph, and runs no rule | layers | error |
 | ✓ | `kernel-imports-nothing` | the kernel imports nothing internal — not a layer, and not the TypeScript SDK | layers | error |

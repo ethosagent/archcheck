@@ -22,7 +22,8 @@ import { resolveQualified } from '../graph/symbols.js';
 import type { Edge } from '../graph/types.js';
 import { err, ok, type Result } from '../result.js';
 import type { Fragment, RawFinding, Rule } from '../types.js';
-import { matchesAny } from '../util/glob.js';
+import { globProblems, matchesAny } from '../util/glob.js';
+import { matchesPattern, patternProblems } from '../util/literalPattern.js';
 import { isQualified, qualifiedMatches } from '../util/qualifiedTarget.js';
 import type { ContractType, EmitCtx, ExplainCtx, Refinement, ValidateCtx } from './types.js';
 
@@ -34,18 +35,37 @@ export const BANNED_CONSTRUCTS = [
   'suppression-comment',
   'string-literal-comparison',
   'empty-catch',
+  'call',
+  'reference',
+  'string-literal',
+  'module-mutable-state',
 ] as const;
 
 export type BannedConstruct = (typeof BANNED_CONSTRUCTS)[number];
 
 /** Constructs that name what they ban, and are meaningless without it. */
-const NEEDS_TARGET = new Set<BannedConstruct>(['member-access', 'new-expression']);
+const NEEDS_TARGET = new Set<BannedConstruct>([
+  'member-access',
+  'new-expression',
+  'call',
+  'reference',
+]);
+
+/** Constructs that ban a SHAPE, so a target would name something they never read. */
+const REFUSES_TARGET = new Set<BannedConstruct>(['module-mutable-state', 'string-literal']);
 
 export type BannedSyntaxParams = {
   appliesTo: string | string[];
   selector: BannedConstruct;
   /** The dotted name to ban, e.g. `Date.now` or `console`. Required by some constructs. */
   target?: string;
+  /** The regular expression a `string-literal` ban matches. Required by that selector alone. */
+  pattern?: string;
+  /**
+   * The one place the banned thing is allowed: the config module that may read `process.env`, the
+   * API client that may call `fetch`. A carve-out beside the rule beats a rule nobody can adopt.
+   */
+  except?: string | string[];
 };
 
 export function asBannedSyntaxParams(rule: Rule): BannedSyntaxParams {
@@ -54,7 +74,10 @@ export function asBannedSyntaxParams(rule: Rule): BannedSyntaxParams {
 
 export function bannedSyntaxApplies(params: BannedSyntaxParams, relativePath: string): boolean {
   const globs = typeof params.appliesTo === 'string' ? [params.appliesTo] : params.appliesTo;
-  return matchesAny(globs, relativePath);
+  if (!matchesAny(globs, relativePath)) return false;
+  if (params.except === undefined) return true;
+  const carve = typeof params.except === 'string' ? [params.except] : params.except;
+  return !matchesAny(carve, relativePath);
 }
 
 export type BannedOccurrence = { line: number; col: number; snippet: string };
@@ -70,6 +93,23 @@ function dottedMatches(target: string, text: string): boolean {
 }
 
 const SUPPRESSION = /(eslint-disable|biome-ignore|@ts-ignore|@ts-expect-error|archcheck-ignore)/;
+
+/** `import 'x'` and `export ... from 'x'`: a specifier is not a hard-coded value. */
+function isImportSpecifierText(node: ts.Node): boolean {
+  const parent = node.parent;
+  if (parent === undefined) return false;
+  if (ts.isImportDeclaration(parent) || ts.isExportDeclaration(parent)) return true;
+  return ts.isImportTypeNode(parent) || ts.isExternalModuleReference(parent);
+}
+
+/** A string inside a literal type says what a value may BE, not what it is. */
+function isTypePosition(node: ts.Node): boolean {
+  for (let at: ts.Node | undefined = node.parent; at !== undefined; at = at.parent) {
+    if (ts.isLiteralTypeNode(at) || ts.isTypeAliasDeclaration(at)) return true;
+    if (ts.isStatement(at) || ts.isSourceFile(at)) return false;
+  }
+  return false;
+}
 
 function scanAst(
   params: BannedSyntaxParams,
@@ -157,6 +197,61 @@ function scanAst(
         }
         break;
       }
+      // A call is defined by what the callee RESOLVES to, which is the whole reason #7 came
+      // first: before it, `fetch` aliased to anything evaded the ban.
+      case 'call': {
+        if (!ts.isCallExpression(node)) break;
+        const resolved = symbolHit(node.expression);
+        if (resolved !== undefined) record(node, `${resolved}()`);
+        break;
+      }
+
+      // Broader than `call`: any READ of the symbol, so `process.env` passed as an argument is
+      // caught as well as `process.env.KEY` being read. The outermost node of a chain only.
+      case 'reference': {
+        if (!ts.isIdentifier(node) && !ts.isPropertyAccessExpression(node)) break;
+        const resolved = symbolHit(node);
+        if (resolved === undefined) break;
+        // The outermost MATCHING node, not the outermost node. A ban on `process.env` has to fire
+        // on `process.env.MODE`, where the whole chain resolves to `...env.MODE` and so does not
+        // match — suppressing the inner node for merely having a parent would find nothing at
+        // all. It is suppressed only when the parent matches too, which is the real double count.
+        const parent = node.parent;
+        const covered =
+          ts.isPropertyAccessExpression(parent) &&
+          parent.expression === node &&
+          symbolHit(parent) !== undefined;
+        if (covered) break;
+        record(node, resolved);
+        break;
+      }
+
+      // A string the reader can act on. A specifier in `import 'x'` and a string inside a literal
+      // type are neither hard-coded values nor things a remedy can move, and reporting them would
+      // make this selector unusable in a real repository.
+      case 'string-literal': {
+        if (!ts.isStringLiteralLike(node)) break;
+        if (params.pattern === undefined) break;
+        if (isImportSpecifierText(node) || isTypePosition(node)) break;
+        if (!matchesPattern(params.pattern, node.text)) break;
+        record(node, node.text);
+        break;
+      }
+
+      // Top-level `let` or `var`, and an exported binding that is not const. It bans a SHAPE, so
+      // it reads no target: module state is hard to test and hard to swap whatever it is called.
+      case 'module-mutable-state': {
+        if (!ts.isVariableStatement(node)) break;
+        if (!ts.isSourceFile(node.parent)) break;
+        const flags = node.declarationList.flags;
+        if ((flags & ts.NodeFlags.Const) !== 0) break;
+        const keyword = (flags & ts.NodeFlags.Let) !== 0 ? 'let' : 'var';
+        const first = node.declarationList.declarations[0];
+        const name = first === undefined ? '' : first.name.getText(source);
+        record(node, `${keyword} ${name}`);
+        break;
+      }
+
       case 'string-literal-comparison':
         if (
           ts.isBinaryExpression(node) &&
@@ -267,6 +362,33 @@ export function findBannedOccurrences(
 function validateParams(rule: Rule, _ctx: ValidateCtx): Result<void> {
   const params = rule.params as Record<string, unknown>;
   const errors: string[] = [];
+
+  const named = params.selector as BannedConstruct;
+  if (REFUSES_TARGET.has(named) && params.target !== undefined) {
+    errors.push(
+      `params.target is meaningless for selector '${named}' — it bans a shape, not a name, ` +
+        'so a target would name something the rule never reads',
+    );
+  }
+  if (named === 'string-literal') {
+    for (const problem of patternProblems(params.pattern)) {
+      errors.push(`params.pattern ${problem}`);
+    }
+  } else if (params.pattern !== undefined) {
+    errors.push(`params.pattern is only read by selector 'string-literal'`);
+  }
+  if (params.except !== undefined) {
+    const carve = typeof params.except === 'string' ? [params.except] : params.except;
+    if (!Array.isArray(carve) || !carve.every((entry) => typeof entry === 'string')) {
+      errors.push('params.except must be a path glob, or a list of them');
+    } else {
+      for (const pattern of carve) {
+        for (const problem of globProblems(pattern)) {
+          errors.push(`params.except pattern '${pattern}' ${problem}`);
+        }
+      }
+    }
+  }
 
   const appliesTo = params.appliesTo;
   const globs = typeof appliesTo === 'string' ? [appliesTo] : appliesTo;

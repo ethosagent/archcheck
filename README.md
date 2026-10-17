@@ -384,6 +384,23 @@ Now each `error` rule needs a file that breaks it. Delete one, and the run fails
 
 ---
 
+
+A `required-file` rule proves the fixture **exists**. It does not prove the fixture still **fails**.
+A fixture whose rule changed shape, or whose violating line somebody tidied away, satisfies that
+rule and looks exactly like compliance — which is the failure this section is about. Run both:
+
+```console
+$ archcheck fixtures verify
+  ✓ domain-imports-no-framework
+  ! adapters-are-swappable  tripped ports-are-interfaces instead — check the place-at path
+
+  1 fixture(s) prove nothing
+```
+
+Each fixture is placed in a scratch copy of the project and the checks are **run** there, so a
+fixture that only looks like a violation is caught. Add `--dir` when the fixtures live elsewhere,
+and `--format json` for a machine. It exits non-zero when any fixture proves nothing.
+
 ## The judgement tier (optional)
 
 Some rules need a reader. "A controller decides nothing" has no configuration that decides it.
