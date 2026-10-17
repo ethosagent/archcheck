@@ -12,6 +12,7 @@
  */
 import { err, ok, type Result } from '../result.js';
 import { CONTRACT_KINDS, type ContractKind, type Rule } from '../types.js';
+import { coveredByProblems } from '../util/coveredBy.js';
 import { globProblems } from '../util/glob.js';
 import type { ArchitectureManifest } from './define.js';
 
@@ -139,6 +140,10 @@ function validateRule(
   if (errors.length === 0) {
     const kindResult = validateParams(rule, allRules);
     if (!kindResult.ok) for (const problem of kindResult.error) errors.push(`${where}: ${problem}`);
+
+    for (const problem of coveredByProblems((rule as { coveredBy?: unknown }).coveredBy)) {
+      push('coveredBy', problem);
+    }
   }
 
   // Glob well-formedness, in the SHARED pass rather than in any kind's validate: a malformed

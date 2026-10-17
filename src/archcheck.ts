@@ -21,7 +21,7 @@ import {
 } from './baseline/index.js';
 import { contractFor, validateParamsByKind, warningsFor } from './contracts/registry.js';
 import { syntaxRequestsOf } from './contracts/syntaxRequests.js';
-import type { ExplainCtx } from './contracts/types.js';
+import type { ExplainCtx, Refinement } from './contracts/types.js';
 import {
   applyEmit,
   checkEmit,
@@ -55,9 +55,12 @@ import type {
   ContractKind,
   Coverage,
   Diagnostic,
+  RawFinding,
+  Rule,
   RunResult,
   SkipRecord,
 } from './types.js';
+import { hasCoveredBy } from './util/coveredBy.js';
 import { repoRelative } from './util/paths.js';
 import { DEFAULT_TEST_GLOBS } from './util/testEdges.js';
 
@@ -145,6 +148,22 @@ export type LoadOptions = {
 
 const TIER_RANK: Record<Confidence, number> = { deterministic: 0, proxy: 1, model: 2 };
 
+/**
+ * A `coveredBy` finding belongs to a rule of SOME kind, and that kind's `refine` would read
+ * evidence it never produced — a layers rule would offer "? may not import that". The field is
+ * rule-level, so its sentence is too.
+ */
+function coveredByRefinement(finding: RawFinding, rule: Rule): Refinement | undefined {
+  const evidence = finding.evidence as Record<string, unknown>;
+  if (evidence.coveredBy !== true) return undefined;
+  return {
+    statement: `${rule.id} is covered by ${String(evidence.tests)}, and ${String(evidence.problem)}`,
+    remedy: {
+      summary: 'write that test, or point coveredBy at the test that enforces this rule today',
+    },
+  };
+}
+
 function probes(): Probe[] {
   return [createGraphProbe(), createLintProbe(), createStructureProbe(), createModelProbe()];
 }
@@ -155,7 +174,7 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
     configPath: options.configPath,
     validateParams: validateParamsByKind,
     collectWarnings: warningsFor,
-    isCheckable: (rule) => contractFor(rule.kind) !== undefined,
+    isCheckable: (rule) => contractFor(rule.kind) !== undefined || hasCoveredBy(rule),
     skipIdCheck: options.skipIdCheck,
   });
   if (!opened.ok) return opened;
@@ -262,7 +281,8 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
       }
 
       for (const probe of probes()) {
-        const handled = rules.some((rule) => probe.handles.includes(rule.kind));
+        const handled =
+          probe.appliesTo?.(rules) ?? rules.some((rule) => probe.handles.includes(rule.kind));
         if (!handled) continue;
 
         const outcome = await probe.run(ctx);
@@ -289,7 +309,9 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
       const normalized = normalize(inputs, {
         byId: (id) => registry.byId(id),
         baselined: checkOptions.baselined ?? identitiesOf(baseline),
-        refine: (finding, rule) => contractFor(rule.kind)?.refine?.(finding, rule, explainCtx),
+        refine: (finding, rule) =>
+          coveredByRefinement(finding, rule) ??
+          contractFor(rule.kind)?.refine?.(finding, rule, explainCtx),
       });
       if (!normalized.ok) return err(normalized.error);
 

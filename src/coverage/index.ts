@@ -10,7 +10,7 @@
  * archcheck independent of anyone's doc format and makes the same data available to a dashboard
  * later without a second emitter.
  */
-import type { Coverage, Rule } from '../types.js';
+import type { Coverage, CoveredBy, Rule } from '../types.js';
 
 export const RULES_JSON = 'rules.json';
 
@@ -25,6 +25,11 @@ export type RuleSummary = {
   confidence: string;
   mark: string;
   remedy: string;
+  /**
+   * Where the rule is enforced, when it says so. Present only on the rules that declare it, so a
+   * reader can see which tests hold a proxy rule up — and notice when one is deleted.
+   */
+  coveredBy?: CoveredBy;
 };
 
 export type RulesDocument = {
@@ -59,6 +64,7 @@ export function rulesDocument(rules: readonly Rule[], coverage: Coverage): Rules
         confidence: rule.confidence,
         mark: MARK[rule.confidence],
         remedy: rule.remedy.summary,
+        ...(rule.coveredBy === undefined ? {} : { coveredBy: rule.coveredBy }),
       }))
       .sort((a, b) => a.id.localeCompare(b.id)),
   };
@@ -74,6 +80,13 @@ function escapeCell(text: string): string {
 /** The generated region: the rule table and the counts. Prose stays hand-written. */
 export function renderRulesTable(document: RulesDocument): string {
   const { coverage } = document;
+  // The column appears only when something fills it. A manifest with no `coveredBy` keeps the
+  // table it has today, byte for byte, so adding the feature changes nobody's generated output.
+  const covered = document.rules.some((rule) => rule.coveredBy !== undefined);
+  const head = covered
+    ? '| | Rule | Statement | Kind | Severity | Covered by |'
+    : '| | Rule | Statement | Kind | Severity |';
+  const rule1 = covered ? '|---|---|---|---|---|---|' : '|---|---|---|---|---|';
   const lines = [
     FENCE_BEGIN,
     '',
@@ -81,12 +94,25 @@ export function renderRulesTable(document: RulesDocument): string {
       `${MARK.proxy} ${coverage.proxy} proxy · ${MARK.model} ${coverage.model} judgement · ` +
       `**${coverage.automatable}% automatable**`,
     '',
-    '| | Rule | Statement | Kind | Severity |',
-    '|---|---|---|---|---|',
-    ...document.rules.map(
-      (rule) =>
-        `| ${rule.mark} | \`${rule.id}\` | ${escapeCell(rule.statement)} | ${rule.kind} | ${rule.severity} |`,
-    ),
+    head,
+    rule1,
+    ...document.rules.map((rule) => {
+      const cells = [
+        rule.mark,
+        `\`${rule.id}\``,
+        escapeCell(rule.statement),
+        rule.kind,
+        rule.severity,
+      ];
+      if (covered) {
+        cells.push(
+          rule.coveredBy === undefined
+            ? ''
+            : escapeCell(rule.coveredBy.tests.map((test) => `\`${test}\``).join(', ')),
+        );
+      }
+      return `| ${cells.join(' | ')} |`;
+    }),
     '',
     FENCE_END,
   ];

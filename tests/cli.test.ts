@@ -226,6 +226,58 @@ describe('the dependency audit', () => {
   });
 });
 
+describe('coveredBy, end to end', () => {
+  /**
+   * `coveredBy` is a rule-level FIELD, not a kind, so the structure probe has to run for a reason
+   * other than `handles` — that is what `Probe.appliesTo` exists for.
+   *
+   * The clean fixture declares two `layers` rules and nothing the structure probe handles. So if
+   * the facade ignored `appliesTo`, the probe would not run, the claim would never be checked, and
+   * the run would say the repository is clean. Nothing in the suite caught that until this test:
+   * removing the `appliesTo` call from the facade left every other test green.
+   */
+  test('a rule of a kind the probe does not handle is still checked', () => {
+    inCopyOf('clean', (root) => {
+      const manifest = join(root, 'architecture.config.ts');
+      const source = readFileSync(manifest, 'utf8');
+      writeFileSync(
+        manifest,
+        source.replace(
+          "      remedy: { summary: 'move the shared type into contracts, or stop sharing it' },",
+          "      coveredBy: { tests: ['test/no-such-file.test.ts'] },\n" +
+            "      remedy: { summary: 'move the shared type into contracts, or stop sharing it' },",
+        ),
+      );
+      const { code, stdout } = archcheck(['--cwd', root]);
+      expect(code).toBe(1);
+      expect(stdout).toContain('contracts-import-nothing is covered by');
+      expect(stdout).toContain('no file matches it');
+    });
+  });
+
+  test('a claim that holds is silent, so the check is not merely loud', () => {
+    inCopyOf('clean', (root) => {
+      const manifest = join(root, 'architecture.config.ts');
+      const source = readFileSync(manifest, 'utf8');
+      writeFileSync(
+        join(root, 'kernel.test.ts'),
+        "test('the kernel imports nothing', () => {});\n",
+      );
+      writeFileSync(
+        manifest,
+        source.replace(
+          "      remedy: { summary: 'move the shared type into contracts, or stop sharing it' },",
+          "      coveredBy: { tests: ['kernel.test.ts'], name: 'the kernel imports nothing' },\n" +
+            "      remedy: { summary: 'move the shared type into contracts, or stop sharing it' },",
+        ),
+      );
+      const { code, stdout } = archcheck(['--cwd', root]);
+      expect(stdout).not.toContain('is covered by');
+      expect(code).toBe(0);
+    });
+  });
+});
+
 describe('exit code 2 — configuration invalid', () => {
   test('an unknown layer in mayImport exits 2, naming the rule and the field', () => {
     const { code, stderr } = archcheck(['--cwd', fixture('broken-manifest')]);

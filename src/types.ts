@@ -60,6 +60,24 @@ export type Remedy = {
  */
 export type EdgeFilter = 'all' | 'production';
 
+/**
+ * Where a rule is enforced when no static check can decide it: "every adapter passes the shared
+ * contract suite", "config is validated at startup". The alternative was leaving such a rule out
+ * of the manifest, which makes it invisible, or declaring it with no check, which counts it as
+ * unchecked forever. Neither records WHERE it is enforced, so the test could be deleted and
+ * nobody would learn.
+ *
+ * archcheck checks the files exist. It does NOT run them, and a `name` is matched by text search.
+ * So a rule covered this way stays a proxy: calling it deterministic would inflate the one number
+ * the computed percentage exists to protect.
+ */
+export type CoveredBy = {
+  /** Globs of the test files that enforce this rule. At least one. */
+  tests: string[];
+  /** Optional: a test title that must appear in those files. */
+  name?: string;
+};
+
 export type Rule = {
   /** Immutable once committed. Renaming means a new id plus `replaces` (LLD §1.6). */
   id: string;
@@ -73,6 +91,8 @@ export type Rule = {
   remedy: Remedy;
   /** Set when this rule supersedes a retired id. */
   replaces?: string;
+  /** Where this rule is enforced, when a static check cannot decide it. See CoveredBy. */
+  coveredBy?: CoveredBy;
   /** Required on an exception (plan 15). */
   owner?: string;
   expires?: string;
