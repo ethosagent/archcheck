@@ -10,14 +10,17 @@
  */
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   buildInitManifest,
   CONFIG_FILENAME,
   EXIT,
   type ExitCode,
   exitCodeFor,
+  type FixtureResult,
   initSummary,
   load,
+  verifyFixtures,
 } from '../archcheck.js';
 import { automatablePercent, MARK } from '../coverage/index.js';
 import { describeUnimplemented } from '../emit/index.js';
@@ -109,6 +112,64 @@ async function runEmit(args: ParsedArgs, cwd: string): Promise<ExitCode> {
   for (const file of changed) console.log(`wrote ${file.path}`);
   console.log(`wrote ${emitted.value.ledgerPath}`);
   return EXIT.clean;
+}
+
+/**
+ * `fixtures verify` — prove each fixture still trips its rule.
+ *
+ * The CLI parses, calls and reports; the running lives in `src/fixtures`, because placing a
+ * fixture and running the checks is behaviour and this module owns none.
+ */
+const COPIED_FOR_VERIFY = [
+  'architecture.config.ts',
+  'tsconfig.json',
+  'package.json',
+  'src',
+  'tests',
+  'examples',
+  'fixtures',
+  '.archcheck',
+] as const;
+
+function runFixtures(args: ParsedArgs, cwd: string): ExitCode {
+  if (args.subcommand !== 'verify') {
+    return fail(['usage: archcheck fixtures verify [--dir <path>] [--format json]'], EXIT.config);
+  }
+  const dir = join(cwd, args.dir ?? join('fixtures', 'rules'));
+  if (!existsSync(dir)) {
+    return fail(
+      [`no fixture directory at ${dir} — pass --dir to say where they live`],
+      EXIT.config,
+    );
+  }
+
+  const results = verifyFixtures({
+    root: cwd,
+    dir,
+    cli: fileURLToPath(import.meta.url),
+    copy: COPIED_FOR_VERIFY.filter((entry) => existsSync(join(cwd, entry))),
+  });
+
+  if (args.format === 'json') {
+    console.log(JSON.stringify({ schemaVersion: 1, fixtures: results }));
+  } else {
+    for (const result of results as FixtureResult[]) {
+      const mark = result.problem !== undefined ? '!' : result.tripped ? '✓' : '✗';
+      const extra =
+        result.problem ??
+        (result.alsoTripped.length > 0 ? `also: ${result.alsoTripped.join(', ')}` : '');
+      console.log(`  ${mark} ${result.ruleId}${extra === '' ? '' : `  ${extra}`}`);
+    }
+    const bad = results.filter((one) => !one.tripped || one.problem !== undefined).length;
+    console.log(
+      bad === 0
+        ? `\nall ${results.length} fixtures trip their rule`
+        : `\n${bad} fixture(s) prove nothing`,
+    );
+  }
+
+  const failed = results.some((one) => !one.tripped || one.problem !== undefined);
+  return failed ? EXIT.violations : EXIT.clean;
 }
 
 function runInit(args: ParsedArgs, cwd: string): ExitCode {
@@ -217,6 +278,8 @@ export async function main(argv: readonly string[]): Promise<ExitCode> {
       return runBaseline(args, cwd);
     case 'init':
       return runInit(args, cwd);
+    case 'fixtures':
+      return runFixtures(args, cwd);
     case 'check':
       return runCheck(args, cwd);
   }

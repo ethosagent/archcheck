@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "coverage": {
-    "total": 24,
-    "deterministic": 23,
+    "total": 25,
+    "deterministic": 24,
     "proxy": 1,
     "model": 0,
     "unchecked": 0,
@@ -71,6 +71,15 @@
       "confidence": "deterministic",
       "mark": "✓",
       "remedy": "rename the file"
+    },
+    {
+      "id": "fixture-verification-runs-rules-and-declares-none",
+      "kind": "layers",
+      "statement": "fixture verification places a fixture and runs the checks, and declares no rule",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "it proves a rule catches something; the rule itself belongs in the manifest"
     },
     {
       "id": "graph-reports-facts-only",

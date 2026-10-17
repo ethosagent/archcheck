@@ -12,6 +12,7 @@ import type { Confidence } from '../types.js';
 
 export type Command =
   | 'check'
+  | 'fixtures'
   | 'emit'
   | 'explain'
   | 'coverage'
@@ -37,6 +38,10 @@ export type ParsedArgs = {
   noColor: boolean;
   ruleId?: string;
   cwd?: string;
+  /** `fixtures verify`: the word after the command, so an unknown one is named rather than run. */
+  subcommand?: string;
+  /** `fixtures verify --dir`: where the `<id>.violation.*` files live. */
+  dir?: string;
 };
 
 const FORMATS: Record<string, ReporterName> = {
@@ -152,7 +157,18 @@ export function parseArgs(argv: readonly string[]): Result<ParsedArgs> {
   // The subcommand is recognised WHEREVER it appears, not only at argv[0]. `--cwd x baseline
   // --write` is a perfectly natural thing to type, and a parser that silently rejected it read
   // as "unexpected argument 'baseline'" — which names the wrong thing.
-  const COMMANDS = new Set(['check', 'emit', 'explain', 'coverage', 'baseline', 'init']);
+  const COMMANDS = new Set([
+    'check',
+    'emit',
+    'explain',
+    'coverage',
+    'baseline',
+    'init',
+    'fixtures',
+  ]);
+  // Words that follow a command rather than naming one. Captured instead of rejected, so
+  // `fixtures nonsense` can say what it expected rather than "unexpected argument".
+  const SUBCOMMANDS = new Set(['verify']);
 
   while (rest.length > 0) {
     const arg = rest.shift() as string;
@@ -194,6 +210,12 @@ export function parseArgs(argv: readonly string[]): Result<ParsedArgs> {
         } else {
           parsed.only = tier;
         }
+        break;
+      }
+      case '--dir': {
+        const value = takeValue();
+        if (value === undefined) errors.push('--dir expects a path');
+        else parsed.dir = value;
         break;
       }
       case '--changed': {
@@ -242,6 +264,8 @@ export function parseArgs(argv: readonly string[]): Result<ParsedArgs> {
         else if (COMMANDS.has(flag) && !sawCommand) {
           parsed.command = flag as Command;
           sawCommand = true;
+        } else if (parsed.command === 'fixtures' && SUBCOMMANDS.has(flag)) {
+          parsed.subcommand = flag;
         } else if (parsed.command === 'explain' && parsed.ruleId === undefined)
           parsed.ruleId = flag;
         else errors.push(`unexpected argument '${flag}'`);
