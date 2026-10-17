@@ -202,6 +202,14 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
         ...(verdict.fromUnit === undefined
           ? {}
           : { fromUnit: verdict.fromUnit, toUnit: verdict.toUnit }),
+        ...(verdict.capture === undefined
+          ? {}
+          : {
+              capture: verdict.capture,
+              fromCapture: verdict.fromCapture,
+              toCapture: verdict.toCapture,
+            }),
+        ...(verdict.externals === undefined ? {} : { externals: verdict.externals }),
         specifier: edge.specifier,
       },
       identity: '',

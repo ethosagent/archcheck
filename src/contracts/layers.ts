@@ -31,17 +31,25 @@
 import { describeMatch, isImplementsMatch, isValidMatch, type LayerMatch } from '../graph/match.js';
 import { err, ok, type Result } from '../result.js';
 import type { EdgeFilter, Fragment, RawFinding, Rule } from '../types.js';
+import { captureNames, captureProblems, capturesOf } from '../util/captures.js';
 import { globProblems } from '../util/glob.js';
 import { edgeInScope } from '../util/testEdges.js';
 import { type Externals, externalReason } from './externals.js';
 import { resolveSiblingEdge, type SiblingPolicy } from './siblings.js';
 import type { ContractType, EmitCtx, ExplainCtx, Refinement, ValidateCtx } from './types.js';
 
+/**
+ * One entry of a layer's allow-list. A plain name allows the layer outright. The object form
+ * allows it only when both files captured the same value for a named segment — "infra may import
+ * domain, but only its OWN module's domain", which no list of layer names can say.
+ */
+export type MayImportEntry = string | { layer: string; same: string };
+
 export type LayersParams = {
   name: string;
   match: LayerMatch;
-  /** Layer names this layer may import, or `'*'` for the composition root. */
-  mayImport: string[] | '*';
+  /** Layers this layer may import, or `'*'` for the composition root. See MayImportEntry. */
+  mayImport: MayImportEntry[] | '*';
   /**
    * Exactly one `layers` rule owns the unlayered-file report. It needs an owner because a file
    * that matches nothing has, by definition, no layer rule of its own to be attributed to — and
@@ -75,7 +83,7 @@ export type Layer = {
   ruleId: string;
   name: string;
   match: LayerMatch;
-  mayImport: string[] | '*';
+  mayImport: MayImportEntry[] | '*';
   ignoreTypeOnly: boolean;
   siblings: SiblingPolicy;
   unit: string | undefined;
@@ -116,6 +124,19 @@ export function buildLayerTable(rules: readonly Rule[]): LayerTable {
   return { layers, unlayeredOwner: owner };
 }
 
+/** Captures only read a single-glob match; validation rejects `same:` on the other forms. */
+function patternOf(match: LayerMatch): string {
+  if (typeof match === 'string') return match;
+  return Array.isArray(match) ? (match[0] ?? '') : '';
+}
+
+/** The allow-list as a reader sees it, with a capture entry shown as `domain(same module)`. */
+function describeEntries(entries: readonly MayImportEntry[]): string[] {
+  return entries.map((entry) =>
+    typeof entry === 'string' ? entry : `${entry.layer}(same ${entry.same})`,
+  );
+}
+
 export type EdgeVerdict =
   | { allowed: true }
   | {
@@ -129,6 +150,10 @@ export type EdgeVerdict =
       toUnit?: string;
       /** Set only by an external-package denial. */
       externals?: 'denied' | 'unlisted';
+      /** Set only by a capture mismatch: the name, and the value each side captured. */
+      capture?: string;
+      fromCapture?: string;
+      toCapture?: string;
     };
 
 /**
@@ -180,20 +205,43 @@ export function resolveEdge(
       ruleId: fromLayer.ruleId,
       fromLayer: fromLayer.name,
       toLayer: toLayerName,
-      mayImport: fromLayer.mayImport === '*' ? [] : fromLayer.mayImport,
+      mayImport: fromLayer.mayImport === '*' ? [] : describeEntries(fromLayer.mayImport),
       fromUnit: sibling.fromUnit,
       toUnit: sibling.toUnit,
     };
   }
   if (fromLayer.mayImport === '*') return { allowed: true };
-  if (fromLayer.mayImport.includes(toLayerName)) return { allowed: true };
+  const entry = fromLayer.mayImport.find(
+    (candidate) => (typeof candidate === 'string' ? candidate : candidate.layer) === toLayerName,
+  );
+  if (typeof entry === 'string') return { allowed: true };
+  if (entry !== undefined) {
+    // The layer is allowed, but only for its own capture. Both sides are read with their own
+    // layer's pattern, because the segment sits at a different index in each.
+    const toLayer = table.layers.find((layer) => layer.name === toLayerName);
+    const fromValues = capturesOf(patternOf(fromLayer.match), paths.from);
+    const toValues =
+      toLayer === undefined ? undefined : capturesOf(patternOf(toLayer.match), paths.to);
+    const wanted = fromValues?.[entry.same];
+    if (wanted !== undefined && wanted === toValues?.[entry.same]) return { allowed: true };
+    return {
+      allowed: false,
+      ruleId: fromLayer.ruleId,
+      fromLayer: fromLayer.name,
+      toLayer: toLayerName,
+      mayImport: describeEntries(fromLayer.mayImport),
+      capture: entry.same,
+      fromCapture: wanted,
+      toCapture: toValues?.[entry.same],
+    };
+  }
   void table;
   return {
     allowed: false,
     ruleId: fromLayer.ruleId,
     fromLayer: fromLayer.name,
     toLayer: toLayerName,
-    mayImport: fromLayer.mayImport,
+    mayImport: describeEntries(fromLayer.mayImport),
   };
 }
 
@@ -232,9 +280,17 @@ function validateParams(rule: Rule, ctx: ValidateCtx): Result<void> {
         .map((other) => (other.params as Record<string, unknown>).name)
         .filter((name): name is string => typeof name === 'string'),
     );
-    for (const name of mayImport) {
+    for (const entry of mayImport) {
+      // Either form names a layer: a bare string, or the object form's `layer`. The shape of the
+      // object itself is checked below; this loop only asks whether the layer it names exists.
+      const name =
+        typeof entry === 'string'
+          ? entry
+          : typeof entry === 'object' && entry !== null
+            ? (entry as { layer?: unknown }).layer
+            : entry;
       if (typeof name !== 'string') {
-        errors.push(`params.mayImport contains ${JSON.stringify(name)}, which is not a layer name`);
+        errors.push(`params.mayImport contains ${JSON.stringify(entry)}, which names no layer`);
       } else if (!known.has(name)) {
         errors.push(
           `params.mayImport names an unknown layer '${name}' — known layers are ${[...known].sort().join(', ')}`,
@@ -242,6 +298,44 @@ function validateParams(rule: Rule, ctx: ValidateCtx): Result<void> {
       } else if (name === params.name) {
         errors.push(
           `params.mayImport lists its own layer '${name}' — a layer always reaches itself`,
+        );
+      }
+    }
+  }
+
+  // The pattern's own faults first: an unstable index or a repeated name make every capture
+  // downstream meaningless, so they are reported before anything that reads one.
+  const match = params.match;
+  const declared = new Set<string>();
+  if (typeof match === 'string') {
+    for (const problem of captureProblems(match)) errors.push(`params.match ${problem}`);
+    for (const name of captureNames(match)) declared.add(name);
+  }
+
+  if (Array.isArray(mayImport)) {
+    for (const entry of mayImport) {
+      if (typeof entry === 'string') continue;
+      if (typeof entry !== 'object' || entry === null) {
+        errors.push('params.mayImport entry must be a layer name, or { layer, same }');
+        continue;
+      }
+      const pair = entry as Record<string, unknown>;
+      if (typeof pair.layer !== 'string' || typeof pair.same !== 'string') {
+        errors.push('params.mayImport entry needs both a layer and a same, as strings');
+        continue;
+      }
+      if (typeof match !== 'string') {
+        errors.push(
+          `params.mayImport names same '${pair.same}', but params.match is not a single glob — ` +
+            'a capture is read from one pattern, so the other match forms cannot define one',
+        );
+        continue;
+      }
+      if (!declared.has(pair.same)) {
+        const known = [...declared].sort().join(', ');
+        errors.push(
+          `params.mayImport names same '${pair.same}', which params.match does not capture — ` +
+            `captures in this match are ${known.length > 0 ? known : 'none'}`,
         );
       }
     }
@@ -394,6 +488,18 @@ function explainFinding(finding: RawFinding, rule: Rule, ctx: ExplainCtx): strin
     ].join('\n');
   }
 
+  const capture = evidence.capture;
+  if (typeof capture === 'string') {
+    const mine = String(evidence.fromCapture ?? '?');
+    const theirs = String(evidence.toCapture ?? '?');
+    return [
+      `${fromLayer}(${capture}=${mine}) may import ${toLayer}(${capture}=${mine}) only`,
+      `  found ${toLayer}(${capture}=${theirs})`,
+      `  ${finding.file} → ${String(evidence.to ?? '')}`,
+      `  → ${rule.remedy.summary}`,
+    ].join('\n');
+  }
+
   const externals = evidence.externals;
   if (typeof externals === 'string') {
     const verb = externals === 'denied' ? 'is denied to' : 'is not on the allow-list of';
@@ -445,6 +551,19 @@ function refineFinding(finding: RawFinding, rule: Rule, ctx: ExplainCtx): Refine
       },
     };
   }
+  if (typeof evidence.capture === 'string') {
+    const capture = evidence.capture;
+    const mine = String(evidence.fromCapture ?? '?');
+    const theirs = String(evidence.toCapture ?? '?');
+    return {
+      statement:
+        `${String(evidence.fromLayer)}(${capture}=${mine}) may import ` +
+        `${String(evidence.toLayer)}(${capture}=${mine}) only, found ` +
+        `${String(evidence.toLayer)}(${capture}=${theirs})`,
+      remedy: rule.remedy,
+    };
+  }
+
   if (typeof evidence.externals === 'string') {
     const params = asLayersParams(rule);
     return {
@@ -473,7 +592,7 @@ function refineFinding(finding: RawFinding, rule: Rule, ctx: ExplainCtx): Refine
       statement: `${fromLayer} may not import ${toLayer}`,
       remedy: {
         ...rule.remedy,
-        allowed: params.mayImport === '*' ? ['anything'] : (params.mayImport ?? []),
+        allowed: params.mayImport === '*' ? ['anything'] : describeEntries(params.mayImport ?? []),
       },
     };
   }
