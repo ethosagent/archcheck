@@ -279,13 +279,22 @@ describe('validate', () => {
   });
 
   test('every construct in the closed set validates with its required params', () => {
+    // The table is written out rather than derived, so adding a selector to the closed set is a
+    // deliberate act here too: a new construct fails this test until somebody states what it
+    // needs. That is the point of the set being closed.
+    const required: Record<string, Record<string, unknown>> = {
+      'member-access': { target: 'Date' },
+      'new-expression': { target: 'Date' },
+      call: { target: 'globalThis#fetch' },
+      reference: { target: 'globalThis#process.env' },
+      'string-literal': { pattern: '^https?://' },
+    };
     for (const selector of BANNED_CONSTRUCTS) {
-      const needsTarget = selector === 'member-access' || selector === 'new-expression';
       const result = bannedSyntaxContract.validate(
-        rule({ appliesTo: 'src/**', selector, ...(needsTarget ? { target: 'Date' } : {}) }),
+        rule({ appliesTo: 'src/**', selector, ...(required[selector] ?? {}) }),
         { rules: [] },
       );
-      expect(result.ok).toBe(true);
+      expect({ selector, ok: result.ok }).toEqual({ selector, ok: true });
     }
   });
 });
