@@ -32,27 +32,34 @@ const RULES: Rule[] = [
 const table = buildLayerTable(RULES);
 const layer = (name: string) => table.layers.find((l) => l.name === name);
 const staticEdge = { external: false, typeOnly: false };
+const paths = { from: 'src/one/a.ts', to: 'src/two/b.ts' };
 
 describe('resolution order — every case has a test', () => {
   test('1 · the same layer is allowed', () => {
-    expect(resolveEdge(table, layer('domain'), 'domain', staticEdge).allowed).toBe(true);
+    expect(resolveEdge(table, layer('domain'), 'domain', staticEdge, paths).allowed).toBe(true);
   });
 
   test('2 · an external target is allowed — a separate rule governs dependencies', () => {
-    const verdict = resolveEdge(table, layer('contracts'), undefined, {
-      external: true,
-      typeOnly: false,
-    });
+    const verdict = resolveEdge(
+      table,
+      layer('contracts'),
+      undefined,
+      {
+        external: true,
+        typeOnly: false,
+      },
+      paths,
+    );
     expect(verdict.allowed).toBe(true);
   });
 
   test('3 · a declared mayImport target is allowed', () => {
-    expect(resolveEdge(table, layer('domain'), 'rules', staticEdge).allowed).toBe(true);
-    expect(resolveEdge(table, layer('service'), 'domain', staticEdge).allowed).toBe(true);
+    expect(resolveEdge(table, layer('domain'), 'rules', staticEdge, paths).allowed).toBe(true);
+    expect(resolveEdge(table, layer('service'), 'domain', staticEdge, paths).allowed).toBe(true);
   });
 
   test('4 · anything else is a violation — DEFAULT DENY', () => {
-    const verdict = resolveEdge(table, layer('domain'), 'service', staticEdge);
+    const verdict = resolveEdge(table, layer('domain'), 'service', staticEdge, paths);
     expect(verdict.allowed).toBe(false);
     if (verdict.allowed) return;
     expect(verdict.ruleId).toBe('domain-no-service-import');
@@ -62,33 +69,33 @@ describe('resolution order — every case has a test', () => {
   });
 
   test('4 · the violation is attributed to the SOURCE layer, which is what must change', () => {
-    const verdict = resolveEdge(table, layer('contracts'), 'rules', staticEdge);
+    const verdict = resolveEdge(table, layer('contracts'), 'rules', staticEdge, paths);
     expect(verdict.allowed).toBe(false);
     if (verdict.allowed) return;
     expect(verdict.ruleId).toBe('contracts-import-nothing');
   });
 
   test("mayImport '*' allows everything — the composition root", () => {
-    expect(resolveEdge(table, layer('root'), 'repository', staticEdge).allowed).toBe(true);
+    expect(resolveEdge(table, layer('root'), 'repository', staticEdge, paths).allowed).toBe(true);
   });
 
   test('an unlayered SOURCE produces no edge verdict; its own finding is the report', () => {
-    expect(resolveEdge(table, undefined, 'domain', staticEdge).allowed).toBe(true);
+    expect(resolveEdge(table, undefined, 'domain', staticEdge, paths).allowed).toBe(true);
   });
 
   test('an unlayered TARGET is not blamed on the importer', () => {
-    expect(resolveEdge(table, layer('domain'), undefined, staticEdge).allowed).toBe(true);
+    expect(resolveEdge(table, layer('domain'), undefined, staticEdge, paths).allowed).toBe(true);
   });
 
   test('a type-only edge is still a dependency unless the layer says otherwise', () => {
     const typeEdge = { external: false, typeOnly: true };
-    expect(resolveEdge(table, layer('domain'), 'service', typeEdge).allowed).toBe(false);
+    expect(resolveEdge(table, layer('domain'), 'service', typeEdge, paths).allowed).toBe(false);
 
     const lenient = buildLayerTable([
       layerRule('lenient', 'domain', ['contracts'], { ignoreTypeOnly: true }),
     ]);
     const lenientLayer = lenient.layers[0];
-    expect(resolveEdge(lenient, lenientLayer, 'service', typeEdge).allowed).toBe(true);
+    expect(resolveEdge(lenient, lenientLayer, 'service', typeEdge, paths).allowed).toBe(true);
   });
 });
 
@@ -244,5 +251,75 @@ describe('explain', () => {
     expect(sentence).toContain('belongs to no declared layer');
     expect(sentence).toContain('declared layers: contracts, domain, root, rules, service');
     expect(sentence).not.toContain('may not import');
+  });
+});
+
+describe('sibling units inside one layer', () => {
+  const featureRule = layerRule('features-are-independent', 'features', [], {
+    match: 'src/features/*/**',
+    siblings: 'deny',
+    unit: 'src/features/*',
+    catchesUnlayered: true,
+  });
+  const featureTable = buildLayerTable([featureRule]);
+  const features = featureTable.layers[0];
+  const cart = 'src/features/cart/index.ts';
+
+  test('an edge into another unit is a violation that names both units', () => {
+    const verdict = resolveEdge(featureTable, features, 'features', staticEdge, {
+      from: cart,
+      to: 'src/features/checkout/index.ts',
+    });
+    expect(verdict.allowed).toBe(false);
+    if (verdict.allowed) return;
+    expect(verdict.fromUnit).toBe('src/features/cart');
+    expect(verdict.toUnit).toBe('src/features/checkout');
+    expect(verdict.ruleId).toBe('features-are-independent');
+  });
+
+  test('an edge inside one unit is allowed', () => {
+    const verdict = resolveEdge(featureTable, features, 'features', staticEdge, {
+      from: cart,
+      to: 'src/features/cart/total.ts',
+    });
+    expect(verdict.allowed).toBe(true);
+  });
+
+  test("the default 'allow' leaves a same-layer edge alone", () => {
+    const lenient = buildLayerTable([
+      layerRule('features-are-one', 'features', [], {
+        match: 'src/features/*/**',
+        unit: 'src/features/*',
+        catchesUnlayered: true,
+      }),
+    ]);
+    const verdict = resolveEdge(lenient, lenient.layers[0], 'features', staticEdge, {
+      from: cart,
+      to: 'src/features/checkout/index.ts',
+    });
+    expect(verdict.allowed).toBe(true);
+  });
+
+  test("siblings 'deny' without a unit is a config error", () => {
+    const rule = layerRule('no-unit', 'features', [], {
+      siblings: 'deny',
+      catchesUnlayered: true,
+    });
+    const result = layersContract.validate(rule, { rules: [rule] });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.join('\n')).toContain('params.unit is missing');
+  });
+
+  test('a unit glob that spans directory levels is a config error', () => {
+    const rule = layerRule('globstar-unit', 'features', [], {
+      siblings: 'deny',
+      unit: 'src/**',
+      catchesUnlayered: true,
+    });
+    const result = layersContract.validate(rule, { rules: [rule] });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.join('\n')).toContain('spans directory levels');
   });
 });

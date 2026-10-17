@@ -144,18 +144,23 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
 
     const from = layerFor(edge.from);
     const to = edge.external ? undefined : layerFor(edge.to);
-    const verdict = resolveEdge(table, from, to?.name, edge);
+    const fromPath = repoRelative(ctx.root, edge.from);
+    const toPath = edge.external ? edge.specifier : repoRelative(ctx.root, edge.to);
+    const verdict = resolveEdge(table, from, to?.name, edge, { from: fromPath, to: toPath });
     if (verdict.allowed) continue;
     findings.push({
       ruleId: verdict.ruleId,
-      file: repoRelative(ctx.root, edge.from),
+      file: fromPath,
       line: edge.line,
       col: edge.col,
       evidence: {
-        from: repoRelative(ctx.root, edge.from),
-        to: repoRelative(ctx.root, edge.to),
+        from: fromPath,
+        to: toPath,
         fromLayer: verdict.fromLayer,
         toLayer: verdict.toLayer,
+        ...(verdict.fromUnit === undefined
+          ? {}
+          : { fromUnit: verdict.fromUnit, toUnit: verdict.toUnit }),
         specifier: edge.specifier,
       },
       identity: '',

@@ -7,11 +7,14 @@
  *
  * DEFAULT DENY is a property of this kind, not a setting. Resolution order for an edge A → B:
  *
- *   1. A and B in the same layer            → allowed
- *   2. B is external                        → allowed (a separate rule governs dependencies)
- *   3. B's layer ∈ A's layer.mayImport      → allowed
- *   4. anything else                        → VIOLATION
- *   5. A matches no layer                   → VIOLATION: unlayered, a different message
+ *   1. B is external                        → allowed (a separate rule governs dependencies)
+ *   2. A and B in the same layer, and that
+ *      layer denies sibling units, and they
+ *      are different units                  → VIOLATION: a sibling edge
+ *   3. A and B in the same layer            → allowed
+ *   4. B's layer ∈ A's layer.mayImport      → allowed
+ *   5. anything else                        → VIOLATION
+ *   6. A matches no layer                   → VIOLATION: unlayered, a different message
  *
  * Case 5 matters more than it looks. A new folder nobody declared fails on its first commit
  * rather than being silently legal, and that is the property that makes a rule set complete
@@ -25,6 +28,8 @@
 import { describeMatch, isImplementsMatch, isValidMatch, type LayerMatch } from '../graph/match.js';
 import { err, ok, type Result } from '../result.js';
 import type { Fragment, RawFinding, Rule } from '../types.js';
+import { globProblems } from '../util/glob.js';
+import { resolveSiblingEdge, type SiblingPolicy } from './siblings.js';
 import type { ContractType, EmitCtx, ExplainCtx, Refinement, ValidateCtx } from './types.js';
 
 export type LayersParams = {
@@ -40,6 +45,13 @@ export type LayersParams = {
   catchesUnlayered?: boolean;
   /** Exempt `import type` edges. Off by default: a type-only edge is still a dependency. */
   ignoreTypeOnly?: boolean;
+  /**
+   * Whether two units inside this layer may import each other. `'allow'` by default, which is
+   * what every layer did before this existed, so adding the field changes nothing on its own.
+   */
+  siblings?: SiblingPolicy;
+  /** What one unit is, as a glob matching directories: `'src/features/*'`. */
+  unit?: string;
 };
 
 export type Layer = {
@@ -48,6 +60,8 @@ export type Layer = {
   match: LayerMatch;
   mayImport: string[] | '*';
   ignoreTypeOnly: boolean;
+  siblings: SiblingPolicy;
+  unit: string | undefined;
 };
 
 export type LayerTable = {
@@ -71,6 +85,8 @@ export function buildLayerTable(rules: readonly Rule[]): LayerTable {
       match: params.match,
       mayImport: params.mayImport,
       ignoreTypeOnly: params.ignoreTypeOnly === true,
+      siblings: params.siblings ?? 'allow',
+      unit: params.unit,
     };
   });
   const owner =
@@ -87,17 +103,25 @@ export type EdgeVerdict =
       fromLayer: string;
       toLayer: string;
       mayImport: readonly string[];
+      /** Set only by a sibling denial: the two units the edge crossed. */
+      fromUnit?: string;
+      toUnit?: string;
     };
 
 /**
- * The whole decision, as a pure function of layer names. No paths, no AST, no I/O — so the
- * resolution order above is testable line by line without a fixture repo.
+ * The whole decision, as a pure function of layer names and the two paths. No AST, no I/O — so
+ * the resolution order above is testable line by line without a fixture repo.
+ *
+ * `paths` is required rather than optional on purpose. A sibling check that silently cannot run
+ * because a caller forgot an argument is indistinguishable from a layer with no sibling rule,
+ * which is the "check that matches nothing" of AGENTS.md rule 14.
  */
 export function resolveEdge(
   table: LayerTable,
   fromLayer: Layer | undefined,
   toLayerName: string | undefined,
   edge: { external: boolean; typeOnly: boolean },
+  paths: { from: string; to: string },
 ): EdgeVerdict {
   if (edge.external) return { allowed: true };
   if (fromLayer === undefined) return { allowed: true };
@@ -108,7 +132,20 @@ export function resolveEdge(
     // wrong file.
     return { allowed: true };
   }
-  if (toLayerName === fromLayer.name) return { allowed: true };
+  if (toLayerName === fromLayer.name) {
+    if (fromLayer.unit === undefined) return { allowed: true };
+    const sibling = resolveSiblingEdge(fromLayer.unit, fromLayer.siblings, paths.from, paths.to);
+    if (!sibling.denied) return { allowed: true };
+    return {
+      allowed: false,
+      ruleId: fromLayer.ruleId,
+      fromLayer: fromLayer.name,
+      toLayer: toLayerName,
+      mayImport: fromLayer.mayImport === '*' ? [] : fromLayer.mayImport,
+      fromUnit: sibling.fromUnit,
+      toUnit: sibling.toUnit,
+    };
+  }
   if (fromLayer.mayImport === '*') return { allowed: true };
   if (fromLayer.mayImport.includes(toLayerName)) return { allowed: true };
   void table;
@@ -171,6 +208,34 @@ function validateParams(rule: Rule, ctx: ValidateCtx): Result<void> {
     }
   }
 
+  const siblings = params.siblings;
+  if (siblings !== undefined && siblings !== 'allow' && siblings !== 'deny') {
+    errors.push(`params.siblings must be 'allow' or 'deny' (got ${JSON.stringify(siblings)})`);
+  }
+
+  const unit = params.unit;
+  if (unit !== undefined && (typeof unit !== 'string' || unit.length === 0)) {
+    errors.push("params.unit must be a glob matching directories, like 'src/features/*'");
+  } else if (typeof unit === 'string') {
+    for (const problem of globProblems(unit)) errors.push(`params.unit ${problem}`);
+    // A globstar spans directory levels, and a unit IS a directory level. `'src/**'` is matched
+    // by the one-segment prefix `'src'`, so every file under src/ lands in one unit and no
+    // sibling edge can ever be denied — a rule that checks nothing, which rule 14 forbids.
+    if (unit.includes('**')) {
+      errors.push(
+        `params.unit '${unit}' uses **, which spans directory levels — the shallowest matching ` +
+          'parent becomes the unit, so whole trees collapse into one unit and no sibling edge ' +
+          "could ever be denied. Name the level a unit lives at, like 'src/features/*'",
+      );
+    }
+  }
+  if (siblings === 'deny' && unit === undefined) {
+    errors.push(
+      "params.siblings is 'deny' but params.unit is missing — nothing can tell two siblings " +
+        'apart without knowing what one unit is',
+    );
+  }
+
   const owners = ctx.rules.filter(
     (other) =>
       other.kind === 'layers' &&
@@ -210,6 +275,7 @@ function emitFragments(rule: Rule, ctx: EmitCtx): Fragment[] {
         mayImport: self.mayImport,
         ignoreTypeOnly: self.ignoreTypeOnly,
         catchesUnlayered: table.unlayeredOwner === rule.id,
+        ...(self.unit === undefined ? {} : { siblings: self.siblings, unit: self.unit }),
         statement: rule.statement,
       },
     },
@@ -260,6 +326,17 @@ function explainFinding(finding: RawFinding, rule: Rule, ctx: ExplainCtx): strin
     ].join('\n');
   }
 
+  const fromUnit = evidence.fromUnit;
+  const toUnit = evidence.toUnit;
+  if (typeof fromUnit === 'string' && typeof toUnit === 'string') {
+    return [
+      `${fromUnit} may not import ${toUnit}`,
+      `  ${finding.file} → ${String(evidence.to ?? '')}`,
+      `  both are units of the ${fromLayer} layer, and it denies imports between its units`,
+      `  → ${rule.remedy.summary}`,
+    ].join('\n');
+  }
+
   return [
     `${fromLayer} may not import ${toLayer ?? 'that'}`,
     `  ${finding.file} → ${String(evidence.to ?? '')}`,
@@ -290,6 +367,15 @@ function refineFinding(finding: RawFinding, rule: Rule, ctx: ExplainCtx): Refine
       },
     };
   }
+  if (typeof evidence.fromUnit === 'string' && typeof evidence.toUnit === 'string') {
+    // Deliberately no `allowed` list. The layer's mayImport is irrelevant to a sibling edge:
+    // naming it would send the reader to widen an allow-list that was never the problem.
+    return {
+      statement: `${evidence.fromUnit} may not import ${evidence.toUnit}`,
+      remedy: { ...rule.remedy },
+    };
+  }
+
   const fromLayer = evidence.fromLayer;
   const toLayer = evidence.toLayer;
   if (typeof fromLayer === 'string' && typeof toLayer === 'string') {
