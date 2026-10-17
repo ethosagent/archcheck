@@ -1,33 +1,54 @@
 # archcheck
 
-**Write your architecture rules once. archcheck checks them, and generates the configuration that
-enforces them.**
+**AI writes the code. archcheck holds the architecture.**
 
-Your architecture lives in many places. It lives in a linter config, in a module-graph config, in a
-CI script, and in a document that somebody wrote a year ago. Nothing keeps these in agreement. A
-rule that changes in one place stays wrong in the others. The copy that people read is often the
-copy that is wrong.
+An agent can produce a week of changes in an afternoon, and every diff looks reasonable on its own.
+Architecture breaks differently: no single change is wrong, and the shape is gone by Friday. A
+service reaches into a domain. A pure rule reads the clock. A dependency arrives that no layer ever
+approved. Code review catches typos at that speed. It does not catch erosion.
 
-archcheck gives you one file. You declare each rule once. archcheck then does two things with it.
+So write the architecture down once, as code, and make it a gate the agent has to pass.
 
+```mermaid
+flowchart LR
+    A["an agent writes code<br/>fast, and plausibly"] --> B{"archcheck"}
+    B -->|"passes"| C["merge"]
+    B -->|"fails"| D["a typed finding<br/>+ the remedy, + the exit code"]
+    D -->|"the agent reads it<br/>and fixes the code"| A
+    E[("architecture.config.ts<br/>your rules, declared once")] --> B
 ```
-                    architecture.config.ts
-                    one file · one rule, once
-                              │
-              ┌───────────────┴───────────────┐
-              │                               │
-          GENERATE                          CHECK
-              │                               │
-    generated/graph.config.cjs        reads your code
-    generated/lint.overrides.json     finds each violation
-    generated/required.json           returns a typed finding
-    generated/rules.json                      │
-    the rule table in your docs               ▼
-              │                     ✗ domain may not import services
-              ▼                       modules/ledger/domain/supersede.ts:4
-    your editor shows the rule          → invert the call: the service
-    before you run anything                calls the domain
+
+The loop is the point. A finding is not prose for a human to interpret &mdash; it is a stable JSON
+shape, a frozen exit code, and a sentence saying what to do instead. An agent reads `exit 1`, reads
+`invert the call: the service calls the domain`, and fixes the right file. An agent reads `exit 2`
+and knows not to touch the code at all.
+
+## One rule, every mechanism
+
+Your architecture usually lives in four places at once: a linter config, a module-graph config, a CI
+script, and a document somebody wrote a year ago. Nothing keeps them in agreement, and the copy
+people read is often the one that is wrong.
+
+archcheck gives you one file, and does two things with it.
+
+```mermaid
+flowchart TD
+    M[("architecture.config.ts")]
+    M --> G["GENERATE"]
+    M --> K["CHECK"]
+
+    G --> G1["generated/graph.config.cjs"]
+    G --> G2["generated/lint.overrides.json"]
+    G --> G3["generated/rules.json<br/>+ the rule table in your docs"]
+    G1 --> ED["your editor shows the rule<br/>as you type"]
+    G2 --> ED
+
+    K --> K1["reads your code"]
+    K1 --> K2["✗ domain may not import services<br/>modules/ledger/domain/supersede.ts:4<br/>→ invert the call: the service calls the domain"]
 ```
+
+Your editor shows the rule before you run anything. CI returns the finding when somebody does not
+look.
 
 Every rule has one home. The generated files carry a header that says they are generated. A gate
 fails if somebody edits one by hand.
@@ -38,11 +59,11 @@ fails if somebody edits one by hand.
 
 | | |
 |---|---|
+| **A guardrail an agent can act on** | `--format json` is a stable, versioned shape. Exit codes are frozen. Every finding carries the remedy, so the agent fixes the cause instead of guessing. |
+| **Rules an agent cannot quietly widen** | The manifest is the only home. The generated configs carry a header saying they are generated, and a gate fails if one is edited by hand. |
 | **One source of truth** | You declare a rule once. Every mechanism reads it. |
 | **Honest coverage** | archcheck counts your rules by tier and computes the percentage. You cannot write a better number by hand. |
-| **A remedy in every finding** | Each finding says what to do next, not only what failed. |
 | **An adoption path** | A baseline records the violations you already have. Your build stays green. You then fix them one at a time. |
-| **Typed output for an agent** | `--format json` gives a stable, versioned shape. Exit codes tell an agent which file to fix. |
 | **SARIF for CI** | `--format sarif` gives code scanning and your editor a format they already read. |
 | **Zero runtime dependencies** | archcheck needs TypeScript, which you already have. |
 
