@@ -11,6 +11,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EXIT } from '../src/archcheck.js';
+import { childEnv } from './childEnv.js';
 
 const ROOT = join(import.meta.dir, '..');
 const CLI = join(ROOT, 'src', 'cli', 'index.ts');
@@ -23,7 +24,7 @@ function archcheck(args: string[], cwd: string) {
     const stdout = execFileSync('bun', ['run', CLI, ...args], {
       cwd,
       encoding: 'utf8',
-      env: { ...process.env, NO_COLOR: '1' },
+      env: childEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     return { code: 0, stdout, stderr: '' };

@@ -17,6 +17,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { childEnv } from './childEnv.js';
 
 const ROOT = join(import.meta.dir, '..');
 const CLI = join(ROOT, 'src', 'cli', 'index.ts');
@@ -35,7 +36,7 @@ function archcheck(
   const run = spawnSync('bun', ['run', entry, ...args], {
     cwd,
     encoding: 'utf8',
-    env: { ...process.env, NO_COLOR: '1' },
+    env: childEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   // A process that never started is not an exit code. `1` is archcheck's "new violations", so
@@ -560,7 +561,7 @@ describe('the published CLI runs when invoked under any name', () => {
       const stdout = execFileSync('node', [entry, ...args], {
         cwd,
         encoding: 'utf8',
-        env: { ...process.env, NO_COLOR: '1' },
+        env: childEnv(),
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       return { code: 0, stdout };
