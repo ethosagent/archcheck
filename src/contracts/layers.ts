@@ -34,6 +34,7 @@ import type { EdgeFilter, Fragment, RawFinding, Rule } from '../types.js';
 import { captureNames, captureProblems, capturesOf } from '../util/captures.js';
 import { globProblems } from '../util/glob.js';
 import { edgeInScope } from '../util/testEdges.js';
+import { DEFAULT_DIMENSION, dimensionOf } from './dimensions.js';
 import { type Externals, externalReason } from './externals.js';
 import { resolveSiblingEdge, type SiblingPolicy } from './siblings.js';
 import type { ContractType, EmitCtx, ExplainCtx, Refinement, ValidateCtx } from './types.js';
@@ -66,6 +67,13 @@ export type LayersParams = {
   /** What one unit is, as a glob matching directories: `'src/features/*'`. */
   unit?: string;
   /**
+   * The axis this layer classifies on. `'layer'` by default, so a manifest naming none has
+   * exactly one axis and behaves as it always did. A second axis — `'runtime'`, a trust zone, a
+   * bounded context — gets its own table and its own unlayered owner, and an edge must satisfy
+   * every axis.
+   */
+  dimension?: string;
+  /**
    * Which edges this rule looks at. `'all'` by default. `'production'` skips edges that start in
    * a test file, so a test may reach for a fixture or an internal without the layer having to
    * declare a test layer with `mayImport: '*'`.
@@ -92,6 +100,8 @@ export type Layer = {
 };
 
 export type LayerTable = {
+  /** Which axis this table classifies on. See `LayersParams.dimension`. */
+  dimension: string;
   layers: readonly Layer[];
   /** The rule id that owns the unlayered report, or undefined when no layers rule is active. */
   unlayeredOwner: string | undefined;
@@ -101,9 +111,20 @@ export function asLayersParams(rule: Rule): LayersParams {
   return rule.params as unknown as LayersParams;
 }
 
-/** The layer table is the SET of layers rules — default deny cannot be decided from one. */
-export function buildLayerTable(rules: readonly Rule[]): LayerTable {
-  const active = rules.filter((rule) => rule.kind === 'layers' && rule.severity !== 'off');
+/**
+ * The layer table is the SET of layers rules on ONE axis — default deny cannot be decided from a
+ * single rule, and it cannot be decided across axes either: a file is in one layer per axis, and
+ * an edge has to satisfy each.
+ *
+ * The argument defaults, so every caller that knows nothing of axes keeps the behaviour it had.
+ */
+export function buildLayerTable(
+  rules: readonly Rule[],
+  dimension: string | undefined = DEFAULT_DIMENSION,
+): LayerTable {
+  const active = rules.filter(
+    (rule) => rule.kind === 'layers' && rule.severity !== 'off' && dimensionOf(rule) === dimension,
+  );
   const layers = active.map((rule) => {
     const params = asLayersParams(rule);
     return {
@@ -121,7 +142,7 @@ export function buildLayerTable(rules: readonly Rule[]): LayerTable {
   const owner =
     active.find((rule) => asLayersParams(rule).catchesUnlayered === true)?.id ??
     (active.length === 1 ? active[0]?.id : undefined);
-  return { layers, unlayeredOwner: owner };
+  return { dimension, layers, unlayeredOwner: owner };
 }
 
 /** Captures only read a single-glob match; validation rejects `same:` on the other forms. */
@@ -274,9 +295,11 @@ function validateParams(rule: Rule, ctx: ValidateCtx): Result<void> {
   if (mayImport !== '*' && !Array.isArray(mayImport)) {
     errors.push("params.mayImport must be a list of layer names, or '*' for the composition root");
   } else if (Array.isArray(mayImport)) {
+    // A layer name is resolved on its own axis: `client` on the runtime axis is not a layer the
+    // `layer` axis can import, and saying so is clearer than a silent miss.
     const known = new Set(
       ctx.rules
-        .filter((other) => other.kind === 'layers')
+        .filter((other) => other.kind === 'layers' && dimensionOf(other) === dimensionOf(rule))
         .map((other) => (other.params as Record<string, unknown>).name)
         .filter((name): name is string => typeof name === 'string'),
     );
@@ -396,15 +419,16 @@ function validateParams(rule: Rule, ctx: ValidateCtx): Result<void> {
     );
   }
 
-  const owners = ctx.rules.filter(
-    (other) =>
-      other.kind === 'layers' &&
-      other.severity !== 'off' &&
-      (other.params as Record<string, unknown>).catchesUnlayered === true,
+  // Per AXIS, not globally. A manifest with a `layer` catch-all and a `runtime` catch-all is
+  // correct, and the old global check would have called the second one a duplicate.
+  const axis = dimensionOf(rule);
+  const sameAxis = ctx.rules.filter(
+    (other) => other.kind === 'layers' && other.severity !== 'off' && dimensionOf(other) === axis,
   );
-  const activeLayers = ctx.rules.filter(
-    (other) => other.kind === 'layers' && other.severity !== 'off',
+  const owners = sameAxis.filter(
+    (other) => (other.params as Record<string, unknown>).catchesUnlayered === true,
   );
+  const activeLayers = sameAxis;
   if (owners.length > 1) {
     errors.push(
       `params.catchesUnlayered is set on ${owners.length} rules (${owners.map((o) => o.id).join(', ')}) — ` +
@@ -412,7 +436,8 @@ function validateParams(rule: Rule, ctx: ValidateCtx): Result<void> {
     );
   } else if (owners.length === 0 && activeLayers.length > 1) {
     errors.push(
-      'no layers rule sets params.catchesUnlayered — one must, or a folder nobody declared is ' +
+      `no layers rule on the '${axis}' axis sets params.catchesUnlayered — one must, or a folder ` +
+        'nobody declared is ' +
         'silently legal, which is the failure default-deny exists to prevent',
     );
   }
@@ -477,7 +502,8 @@ function explainFinding(finding: RawFinding, rule: Rule, ctx: ExplainCtx): strin
   const allowed = params.mayImport === '*' ? ['anything'] : (params.mayImport ?? []);
 
   if (evidence.unlayered === true) {
-    const declared = buildLayerTable(ctx.rules)
+    const axis = typeof evidence.dimension === 'string' ? evidence.dimension : undefined;
+    const declared = buildLayerTable(ctx.rules, axis)
       .layers.map((layer) => layer.name)
       .sort()
       .join(', ');
@@ -521,6 +547,16 @@ function explainFinding(finding: RawFinding, rule: Rule, ctx: ExplainCtx): strin
     ].join('\n');
   }
 
+  const axisName = evidence.dimension;
+  if (typeof axisName === 'string') {
+    return [
+      `${fromLayer} may not import ${toLayer ?? 'that'} on the ${axisName} axis`,
+      `  ${finding.file} → ${String(evidence.to ?? '')}`,
+      `  ${fromLayer} may import: ${allowed.length > 0 ? allowed.join(', ') : 'nothing'}`,
+      `  → ${rule.remedy.summary}`,
+    ].join('\n');
+  }
+
   return [
     `${fromLayer} may not import ${toLayer ?? 'that'}`,
     `  ${finding.file} → ${String(evidence.to ?? '')}`,
@@ -536,12 +572,15 @@ function explainFinding(finding: RawFinding, rule: Rule, ctx: ExplainCtx): strin
 function refineFinding(finding: RawFinding, rule: Rule, ctx: ExplainCtx): Refinement | undefined {
   const evidence = finding.evidence as Record<string, unknown>;
   if (evidence.unlayered === true) {
-    const declared = buildLayerTable(ctx.rules)
+    const axisName = typeof evidence.dimension === 'string' ? evidence.dimension : undefined;
+    const declared = buildLayerTable(ctx.rules, axisName)
       .layers.map((layer) => layer.name)
       .sort()
       .join(', ');
+    const axis = evidence.dimension;
+    const onAxis = typeof axis === 'string' ? ` on the ${axis} axis` : '';
     return {
-      statement: `${finding.file} belongs to no declared layer`,
+      statement: `${finding.file} belongs to no declared layer${onAxis}`,
       remedy: {
         // Deliberately no `allowed` list here. The declared layers go in the sentence instead:
         // labelling them "allowed" would say this file may import them, which is not the problem.
@@ -588,8 +627,10 @@ function refineFinding(finding: RawFinding, rule: Rule, ctx: ExplainCtx): Refine
   const toLayer = evidence.toLayer;
   if (typeof fromLayer === 'string' && typeof toLayer === 'string') {
     const params = asLayersParams(rule);
+    const axis = evidence.dimension;
+    const where = typeof axis === 'string' ? ` on the ${axis} axis` : '';
     return {
-      statement: `${fromLayer} may not import ${toLayer}`,
+      statement: `${fromLayer} may not import ${toLayer}${where}`,
       remedy: {
         ...rule.remedy,
         allowed: params.mayImport === '*' ? ['anything'] : describeEntries(params.mayImport ?? []),

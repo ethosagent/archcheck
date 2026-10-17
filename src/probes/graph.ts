@@ -9,6 +9,8 @@
  * Diff scoping is edge-level: given a changed set, evaluate edges whose `from` is in it. An edge
  * INTO a changed file is not a new violation — the importer did not change.
  */
+
+import { DEFAULT_DIMENSION, dimensionsOf } from '../contracts/dimensions.js';
 import { asEncapsulationParams, resolveEncapsulation } from '../contracts/encapsulation.js';
 import { asForbiddenParams, forbiddenApplies } from '../contracts/forbidden.js';
 import { buildLayerTable, type Layer, resolveEdge } from '../contracts/layers.js';
@@ -106,9 +108,19 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
   const forbiddenRules = ctx.rules.filter(
     (rule) => rule.kind === 'forbidden' && rule.severity !== 'off',
   );
-  if (table.layers.length === 0 && barrelRules.length === 0 && forbiddenRules.length === 0) {
+  const axisLayers = dimensionsOf(ctx.rules).length;
+  if (axisLayers === 0 && barrelRules.length === 0 && forbiddenRules.length === 0) {
     return [];
   }
+
+  // The default axis keeps the code path it had. Any further axis declared by the manifest gets
+  // its own table, its own cache and its own unlayered owner, and an edge must satisfy each.
+  const extraAxes = dimensionsOf(ctx.rules)
+    .filter((name) => name !== DEFAULT_DIMENSION)
+    .map((name) => ({
+      table: buildLayerTable(ctx.rules, name),
+      cache: new Map<string, Layer | undefined>(),
+    }));
 
   const changed = ctx.changed === undefined ? undefined : new Set(ctx.changed);
   const inScope = (file: string) =>
@@ -177,6 +189,44 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
       });
     }
 
+    for (const axis of extraAxes) {
+      const axisLayerFor = (file: string): Layer | undefined => {
+        if (!axis.cache.has(file)) {
+          axis.cache.set(file, layerOf(axis.table.layers, file, ctx.root, graph));
+        }
+        return axis.cache.get(file);
+      };
+      const axisFrom = axisLayerFor(edge.from);
+      const axisTo = edge.external ? undefined : axisLayerFor(edge.to);
+      const axisVerdict = resolveEdge(
+        axis.table,
+        axisFrom,
+        axisTo?.name,
+        { ...edge, test: fromIsTest },
+        {
+          from: fromPath,
+          to: toPath,
+        },
+      );
+      if (axisVerdict.allowed) continue;
+      findings.push({
+        ruleId: axisVerdict.ruleId,
+        file: fromPath,
+        line: edge.line,
+        col: edge.col,
+        evidence: {
+          from: fromPath,
+          to: toPath,
+          dimension: axis.table.dimension,
+          fromLayer: axisVerdict.fromLayer,
+          toLayer: axisVerdict.toLayer,
+          specifier: edge.specifier,
+          test: fromIsTest,
+        },
+        identity: '',
+      });
+    }
+
     const verdict = resolveEdge(
       table,
       from,
@@ -218,16 +268,30 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
 
   // Case 5 of the resolution order: a file nobody declared. Reported once per file, against the
   // one layers rule that owns the unlayered report.
-  const owner = table.unlayeredOwner;
-  if (owner !== undefined) {
+  const axisReports: { table: typeof table; cache: Map<string, Layer | undefined> }[] = [
+    { table, cache: layerCache },
+    ...extraAxes,
+  ];
+  for (const axis of axisReports) {
+    const owner = axis.table.unlayeredOwner;
+    if (owner === undefined) continue;
     for (const file of graph.files) {
       if (!inScope(file)) continue;
-      if (layerFor(file) !== undefined) continue;
+      if (!axis.cache.has(file)) {
+        axis.cache.set(file, layerOf(axis.table.layers, file, ctx.root, graph));
+      }
+      if (axis.cache.get(file) !== undefined) continue;
       const relative = repoRelative(ctx.root, file);
       findings.push({
         ruleId: owner,
         file: relative,
-        evidence: { unlayered: true, file: relative },
+        evidence: {
+          unlayered: true,
+          file: relative,
+          ...(axis.table.dimension === DEFAULT_DIMENSION
+            ? {}
+            : { dimension: axis.table.dimension }),
+        },
         identity: '',
       });
     }
