@@ -63,14 +63,53 @@ jobs:
         run: bun run check
       - run: bun run build
 
-      - name: the package must install clean in an empty project
+      # `--version` and `--help` touch no compiler API, so this step used to pass against a
+      # package that could not do any real work. Two things made that possible, and both are
+      # fixed here.
+      #
+      # `npm install typescript` now resolves to TypeScript 7, the native port, which exposes a
+      # different API from a different subpath. archcheck's peer range already says `>=5.4 <7`
+      # and it refuses to read a graph at runtime, with a message naming the fix — but npm only
+      # warns, so an unpinned install produced an unusable package and a green smoke test.
+      #
+      # And a smoke test that never reads the graph never exercises the part most likely to be
+      # broken by a packaging mistake. So this one runs `init`, then a real check, then imports
+      # both subpath exports, which is the only way the `exports` map is tested at all.
+      - name: the package must install clean in an empty project, and do real work
         run: |
           npm pack --pack-destination /tmp
-          mkdir -p /tmp/consumer && cd /tmp/consumer
+          mkdir -p /tmp/consumer/src/domain /tmp/consumer/src/service && cd /tmp/consumer
           npm init -y >/dev/null
-          npm install --silent "/tmp/archcheck-${{ inputs.version }}.tgz" typescript
+          npm install --silent "/tmp/archcheck-${{ inputs.version }}.tgz" 'typescript@^5.9'
+          cat > tsconfig.json <<'JSON'
+          { "compilerOptions": { "target": "ES2022", "module": "NodeNext",
+            "moduleResolution": "NodeNext", "strict": true, "noEmit": true, "skipLibCheck": true },
+            "include": ["src/**/*.ts"] }
+          JSON
+          echo 'export const write = (n: number): number => n;' > src/service/write.ts
+          printf 'import { write } from "../service/write.js";\nexport const price = (n: number): number => write(n);\n' > src/domain/price.ts
+
           npx archcheck --version
           npx archcheck --help | head -1
+
+          # init has to READ the graph, which is what the version guard above is about.
+          npx archcheck init
+          grep -q "mayImport: \['service'\]" architecture.config.ts
+
+          npx archcheck --format json > run.json
+          node -e "const r=require('./run.json'); if (r.schemaVersion!==1) { throw new Error('schemaVersion '+r.schemaVersion) }"
+
+          # The `exports` map, from a consumer's side. A wrong subpath is invisible until now.
+          npx archcheck emit
+          node --input-type=module -e "
+            import { archcheckEslintBlocks } from 'archcheck/eslint';
+            import { archcheckBiomeOverrides } from 'archcheck/biome';
+            const e = archcheckEslintBlocks('generated');
+            const b = archcheckBiomeOverrides('generated').overrides;
+            if (e.length === 0) throw new Error('archcheck/eslint produced no blocks');
+            if (b.length === 0) throw new Error('archcheck/biome produced no overrides');
+            console.log('eslint blocks', e.length, '| biome overrides', b.length);
+          "
 
       - name: publish
         if: ${{ inputs.dry-run == false }}
