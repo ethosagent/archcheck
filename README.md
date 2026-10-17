@@ -311,6 +311,50 @@ commit. It is never silently legal.
 
 One `layers` rule carries `catchesUnlayered: true`. That rule reports a file in no layer.
 
+### The dependency audit
+
+A layer says which packages it may import:
+
+```ts
+params: { name: 'domain', match: 'src/domain/**', mayImport: [], externals: { allow: ['zod'] } }
+```
+
+That answers a question about one import. It does not answer a question about the repository: is
+this dependency approved by the architecture **at all**? A package can sit in `package.json` and be
+imported by nothing, and nobody notices the import that is missing.
+
+One `layers` rule may own that audit:
+
+```ts
+params: {
+  name: 'domain',
+  match: 'src/domain/**',
+  mayImport: [],
+  externals: { allow: ['zod'] },
+  auditsDependencies: true,
+  unassigned: ['bun-types'],
+  // auditsDevDependencies: true,
+}
+```
+
+Each package in `package.json` that no layer allows is then reported against `package.json`:
+
+```
+left-pad is a dependency no layer may import      the-domain-decides
+  package.json
+  allowed: zod
+  → put the dependency in a layer that is allowed to import it
+```
+
+Four things are worth knowing before you turn it on:
+
+| | |
+|---|---|
+| **`unassigned` is the escape hatch** | A package the architecture knowingly does not place — a type-only dependency the compiler reads, for example. Named in the manifest, beside the rule, where a reader finds it |
+| **`devDependencies` are ignored by default** | A dev tool is not part of the architecture. `auditsDevDependencies: true` includes them |
+| **The audit is opt-in twice over** | It needs the flag **and** at least one layer with an `externals.allow` list. With the flag alone, nothing is approved by anybody, so every dependency would be a finding — noise, not a result |
+| **One rule owns it** | Two rules claiming the audit is a configuration error. Two owners would report each dependency twice, under two rule ids, and a reader would have to work out which to fix |
+
 ### Three tiers, so archcheck does not pretend
 
 Each rule declares its `confidence`. The tier says how much to trust a pass.
