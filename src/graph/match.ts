@@ -6,6 +6,8 @@
  * the right way to say it — an adapter is an adapter because of what it implements, not because of
  * where someone filed it.
  */
+
+import { toGlob } from '../util/captures.js';
 import { matchesAny } from '../util/glob.js';
 import { repoRelative } from '../util/paths.js';
 import type { FileFacts } from './types.js';
@@ -36,7 +38,10 @@ export function fileMatches(
   if (isImplementsMatch(match)) {
     return facts?.implementsPorts.includes(match.implements) === true;
   }
-  const patterns = typeof match === 'string' ? [match] : match;
+  // `{name}` is a capture, and for MEMBERSHIP it is just one segment. Reducing it to `*` keeps
+  // the one glob compiler in charge: a second, capture-aware parser would drift from it, which is
+  // the fault `globProblems` exists to prevent.
+  const patterns = (typeof match === 'string' ? [match] : match).map(toGlob);
   return matchesAny(patterns, repoRelative(root, absoluteFile));
 }
 
