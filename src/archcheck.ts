@@ -449,6 +449,17 @@ export function describeViolations(ruleId: string, diagnostics: readonly Diagnos
 }
 
 /**
+ * Fixture verification, exposed here rather than reached for by the CLI. `cli-owns-no-behaviour`
+ * said so in its own remedy: the CLI parses, calls and reports, and a capability belongs on this
+ * surface so a programmatic consumer reaches it the same way.
+ */
+export {
+  type FixtureResult,
+  fixtureNames,
+  type VerifyOptions,
+  verifyFixtures,
+} from './fixtures/verify.js';
+/**
  * The order matters. An expired exception is a MANIFEST problem (exit 2) and is checked first,
  * because the violations it stopped covering are a consequence of it rather than news of their own.
  * A stale baseline (exit 4) outranks live violations for the same reason: the fix is

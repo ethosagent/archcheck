@@ -8,6 +8,7 @@
     "every-error-rule-has-a-fixture",
     "exceptions-are-a-leaf",
     "filenames-are-camel-case-or-kebab",
+    "fixture-verification-runs-rules-and-declares-none",
     "graph-reports-facts-only",
     "init-infers-and-writes-nothing-else",
     "kernel-imports-nothing",

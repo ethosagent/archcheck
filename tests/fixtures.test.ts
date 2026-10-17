@@ -12,7 +12,7 @@
  * slow enough that somebody would eventually delete it.
  */
 import { describe, expect, test } from 'bun:test';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   appendFileSync,
   cpSync,
@@ -238,5 +238,29 @@ describe('every contract kind has a package fixture', () => {
     // it fails the day a ninth kind is declared without a fixture repository to prove it trips.
     const uncovered = CONTRACT_KINDS.filter((kind) => COVERED_BY[kind] === undefined);
     expect(uncovered).toEqual([]);
+  });
+});
+
+describe('the fixtures verify command', () => {
+  /**
+   * The suite above asserts each fixture is caught by EXACTLY its own rule, which is stricter than
+   * the command: the command reports other rules a fixture trips as information, because a
+   * consumer's fixture legitimately may. Both are kept — this test proves the command a consumer
+   * runs agrees with the suite archcheck runs on itself, and the suite keeps the stricter claim.
+   */
+  test('agrees with this suite: every fixture in this repository trips its rule', () => {
+    const run = spawnSync('bun', ['run', CLI, 'fixtures', 'verify', '--format', 'json'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    expect(run.status).toBe(0);
+
+    const report = JSON.parse(run.stdout) as {
+      fixtures: { ruleId: string; tripped: boolean; problem?: string }[];
+    };
+    const failed = report.fixtures.filter((one) => !one.tripped || one.problem !== undefined);
+    expect(failed.map((one) => one.ruleId)).toEqual([]);
+    expect(report.fixtures.length).toBe(fixtureFiles().length);
   });
 });

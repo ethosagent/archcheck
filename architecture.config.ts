@@ -81,6 +81,19 @@ export default defineArchitecture({
     },
     {
       ...law,
+      id: 'fixture-verification-runs-rules-and-declares-none',
+      statement: 'fixture verification places a fixture and runs the checks, and declares no rule',
+      params: {
+        name: 'fixtures',
+        match: 'src/fixtures/**',
+        mayImport: ['kernel', 'util'],
+      },
+      remedy: {
+        summary: 'it proves a rule catches something; the rule itself belongs in the manifest',
+      },
+    },
+    {
+      ...law,
       id: 'the-baseline-is-a-leaf',
       statement: 'the baseline reads and writes one file and knows nothing about rules',
       params: { name: 'baseline', match: 'src/baseline/**', mayImport: ['kernel'] },
@@ -180,6 +193,7 @@ export default defineArchitecture({
         mayImport: [
           'kernel',
           'util',
+          'fixtures',
           'registry',
           'graph',
           'contract',
