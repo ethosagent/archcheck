@@ -2,6 +2,12 @@
   "$generated": {
     "by": "archcheck",
     "doNotEdit": true,
+    "notExpressedByBiome": [
+      "filenames-are-camel-case-or-kebab",
+      "no-computed-dynamic-import",
+      "no-empty-catch",
+      "no-inline-suppression"
+    ],
     "notExpressedByEslint": [
       "filenames-are-camel-case-or-kebab",
       "no-inline-suppression"

@@ -154,6 +154,78 @@ describe('the forbidden kind', () => {
   });
 });
 
+describe('the dependency audit', () => {
+  /**
+   * The fourth criterion of the externals work (#2), split out as #39. `externals` answers "may
+   * this layer reach this package", a question about one import. This answers "is this dependency
+   * approved at all", a question about the repository — and a dependency nothing imports has no
+   * edge to hang a finding on, which is the case worth catching.
+   */
+  test('a dependency no layer allows is reported against package.json', () => {
+    const { code, stdout } = archcheck(['--cwd', fixture('dependencies')]);
+    expect(code).toBe(1);
+    expect(stdout).toContain('left-pad is a dependency no layer may import');
+    expect(stdout).toContain('package.json');
+    // The approved set is named, so a reader knows where to put the dependency.
+    expect(stdout).toContain('allowed: zod');
+    // `zod` is on a layer's allow-list and `bun-types` is declared unassigned. Both silent.
+    expect(stdout).not.toContain('zod is a dependency');
+    expect(stdout).not.toContain('bun-types');
+  });
+
+  test('devDependencies are audited only when the rule asks for them', () => {
+    // vitest is a devDependency no layer allows. Silent by default — a dev tool is not part of
+    // the architecture — and reported once the rule says to look.
+    expect(archcheck(['--cwd', fixture('dependencies')]).stdout).not.toContain('vitest');
+
+    inCopyOf('dependencies', (root) => {
+      const manifest = join(root, 'architecture.config.ts');
+      const source = readFileSync(manifest, 'utf8');
+      writeFileSync(
+        manifest,
+        source.replace(
+          'auditsDependencies: true,',
+          'auditsDependencies: true,\n        auditsDevDependencies: true,',
+        ),
+      );
+      const { stdout } = archcheck(['--cwd', root]);
+      expect(stdout).toContain('vitest is a dependency no layer may import');
+      expect(stdout).toContain('left-pad is a dependency no layer may import');
+    });
+  });
+
+  test('a manifest with no externals audits nothing, so the check is opt-in twice over', () => {
+    // Two opt-ins, and the second is not pedantry. With the flag alone and no allow-list, NOTHING
+    // is approved by anybody, so every dependency would be a finding — noise, not a result.
+    inCopyOf('dependencies', (root) => {
+      const manifest = join(root, 'architecture.config.ts');
+      const source = readFileSync(manifest, 'utf8');
+      writeFileSync(manifest, source.replace("externals: { allow: ['zod'] },", ''));
+      const { code, stdout } = archcheck(['--cwd', root]);
+      expect(stdout).not.toContain('is a dependency no layer may import');
+      expect(code).toBe(0);
+    });
+  });
+
+  test('two rules claiming the audit is a config error, not a double report', () => {
+    inCopyOf('dependencies', (root) => {
+      const manifest = join(root, 'architecture.config.ts');
+      const source = readFileSync(manifest, 'utf8');
+      writeFileSync(
+        manifest,
+        source.replace(
+          "params: { name: 'service', match: 'src/service/**', mayImport: ['domain'] },",
+          "params: {\n        name: 'service',\n        match: 'src/service/**',\n        mayImport: ['domain'],\n        auditsDependencies: true,\n      },",
+        ),
+      );
+      const { code, stderr } = archcheck(['--cwd', root]);
+      expect(code).toBe(2);
+      expect(stderr).toContain('params.auditsDependencies is set on 2 rules');
+      expect(stderr).toContain('exactly one layers rule owns the dependency audit');
+    });
+  });
+});
+
 describe('exit code 2 — configuration invalid', () => {
   test('an unknown layer in mayImport exits 2, naming the rule and the field', () => {
     const { code, stderr } = archcheck(['--cwd', fixture('broken-manifest')]);
