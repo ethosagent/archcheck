@@ -7,6 +7,8 @@
  * (LLD §1.3), so adding a form to the language means adding it here.
  */
 import ts from 'typescript';
+import { collectSyntax } from './syntax.js';
+import type { SyntaxRequest } from './syntaxRequest.js';
 import type { DynamicKind, Edge, FileFacts } from './types.js';
 
 function positionOf(source: ts.SourceFile, node: ts.Node): { line: number; col: number } {
@@ -118,6 +120,7 @@ export function extractFacts(
   source: ts.SourceFile,
   checker: ts.TypeChecker,
   resolve: ResolveSpecifier,
+  syntax: readonly SyntaxRequest[] = [],
 ): FileFacts {
   const edges: Edge[] = [];
 
@@ -179,5 +182,6 @@ export function extractFacts(
     edges,
     implementsPorts: collectImplementedPorts(source, checker),
     exports: collectExports(source, checker),
+    ...(syntax.length === 0 ? {} : { syntax: collectSyntax(source, checker, syntax) }),
   };
 }

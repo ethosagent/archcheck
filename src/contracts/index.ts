@@ -6,6 +6,7 @@ export {
   type BannedSyntaxParams,
   bannedSyntaxApplies,
   bannedSyntaxContract,
+  bannedSyntaxRequest,
   findBannedOccurrences,
 } from './banned-syntax.js';
 export {
@@ -13,6 +14,7 @@ export {
   type DeclaredFieldParams,
   declaredFieldApplies,
   declaredFieldContract,
+  declaredFieldRequest,
   findMissingDeclarations,
   type MissingDeclaration,
 } from './declared-field.js';
@@ -80,4 +82,5 @@ export {
   type SiblingVerdict,
   unitOf,
 } from './siblings.js';
+export { syntaxRequestsOf } from './syntaxRequests.js';
 export type { ContractType, EmitCtx, ExplainCtx, Refinement, ValidateCtx } from './types.js';

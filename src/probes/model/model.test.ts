@@ -36,7 +36,6 @@ const emptyGraph: ModuleGraph = {
   files: [],
   edges: [],
   factsFor: () => undefined,
-  sourceFileFor: () => undefined,
   walkedCount: 0,
 };
 

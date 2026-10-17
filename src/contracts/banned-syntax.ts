@@ -14,17 +14,19 @@
  * with an owner and an expiry (plan 15); making the inline escape hatch itself a violation is what
  * stops the manifest being bypassed.
  *
- * What a caller must know: these are evaluated over OUR OWN AST. We already hold the program from
- * the graph reader, so a second parse would be waste. `remedy.autofix` stays false.
+ * What a caller must know: this file WALKS NOTHING. It states the question as a `SyntaxRequest`,
+ * and the graph answers it once per file and caches the answer. Before 0.3.2 the walk lived here,
+ * which meant the kind could not run against an ingested graph, paid for its walk on every run,
+ * and put the compiler API in the layer that is meant to hold decisions only. `remedy.autofix`
+ * stays false.
  */
-import ts from 'typescript';
-import { resolveQualified } from '../graph/symbols.js';
+import type { SyntaxFacts } from '../graph/syntax.js';
+import { requestKey, type SyntaxRequest } from '../graph/syntaxRequest.js';
 import type { Edge } from '../graph/types.js';
 import { err, ok, type Result } from '../result.js';
 import type { Fragment, RawFinding, Rule } from '../types.js';
 import { globProblems, matchesAny } from '../util/glob.js';
 import { matchesPattern, patternProblems } from '../util/literalPattern.js';
-import { isQualified, qualifiedMatches } from '../util/qualifiedTarget.js';
 import type { ContractType, EmitCtx, ExplainCtx, Refinement, ValidateCtx } from './types.js';
 
 /** The closed set. Adding one is a deliberate change with a fixture, not a config value. */
@@ -82,281 +84,50 @@ export function bannedSyntaxApplies(params: BannedSyntaxParams, relativePath: st
 
 export type BannedOccurrence = { line: number; col: number; snippet: string };
 
-function positionOf(source: ts.SourceFile, node: ts.Node): { line: number; col: number } {
-  const { line, character } = source.getLineAndCharacterOfPosition(node.getStart(source));
-  return { line: line + 1, col: character + 1 };
-}
-
-/** `console` matches `console.log`; `Date.now` matches only `Date.now`. */
-function dottedMatches(target: string, text: string): boolean {
-  return text === target || text.startsWith(`${target}.`);
-}
-
-const SUPPRESSION = /(eslint-disable|biome-ignore|@ts-ignore|@ts-expect-error|archcheck-ignore)/;
-
-/** `import 'x'` and `export ... from 'x'`: a specifier is not a hard-coded value. */
-function isImportSpecifierText(node: ts.Node): boolean {
-  const parent = node.parent;
-  if (parent === undefined) return false;
-  if (ts.isImportDeclaration(parent) || ts.isExportDeclaration(parent)) return true;
-  return ts.isImportTypeNode(parent) || ts.isExternalModuleReference(parent);
-}
-
-/** A string inside a literal type says what a value may BE, not what it is. */
-function isTypePosition(node: ts.Node): boolean {
-  for (let at: ts.Node | undefined = node.parent; at !== undefined; at = at.parent) {
-    if (ts.isLiteralTypeNode(at) || ts.isTypeAliasDeclaration(at)) return true;
-    if (ts.isStatement(at) || ts.isSourceFile(at)) return false;
-  }
-  return false;
-}
-
-function scanAst(
-  params: BannedSyntaxParams,
-  source: ts.SourceFile,
-  found: BannedOccurrence[],
-  checker?: ts.TypeChecker,
-): void {
-  const target = params.target ?? '';
-  // A qualified target is decided by what the name REFERS to, which needs a checker. A dotted
-  // target keeps the text comparison it always had, so existing manifests are unaffected — and a
-  // qualified target without a checker finds nothing rather than guessing from the text, because
-  // the whole point of writing it qualified was to stop trusting the text.
-  const bySymbol = isQualified(target) && checker !== undefined;
-  // A declaration is not a use. The import that brings `exec` in, and the binding that pulls
-  // `log` out of `console`, both REFER to the banned symbol — but `banned-syntax` is about code
-  // that uses a construct, and banning the import itself is what `forbidden` and `layers` are
-  // for. The text path never matched an import line either.
-  //
-  // The relationship is DIRECT, not ancestral: a first attempt walked the ancestors and matched
-  // `isVariableDeclaration`, which silenced every call site too, because `const one = () =>
-  // run(...)` puts the call inside a variable declaration.
-  const isDeclarationSite = (node: ts.Node): boolean => {
-    const parent = node.parent;
-    if (parent === undefined) return false;
-    if (ts.isImportSpecifier(parent)) return true;
-    if (ts.isNamespaceImport(parent) || ts.isImportClause(parent)) return true;
-    if (ts.isBindingElement(parent)) return parent.name === node || parent.propertyName === node;
-    return false;
-  };
-  const symbolHit = (node: ts.Node): string | undefined => {
-    if (!bySymbol || checker === undefined) return undefined;
-    if (isDeclarationSite(node)) return undefined;
-    const resolved = resolveQualified(node, checker);
-    if (resolved === undefined || !qualifiedMatches(target, resolved)) return undefined;
-    return resolved;
-  };
-  const record = (node: ts.Node, snippet: string) => {
-    found.push({ ...positionOf(source, node), snippet });
-  };
-
-  const visit = (node: ts.Node): void => {
-    switch (params.selector) {
-      case 'member-access': {
-        if (bySymbol) {
-          // The outermost node of a chain again, for the same reason: `console.log.call` would
-          // otherwise be counted at two depths. An identifier whose parent is a property access
-          // is skipped, because the parent carries the whole path.
-          const skip =
-            ts.isPropertyAccessExpression(node.parent) && node.parent.expression === node;
-          const resolved = skip ? undefined : symbolHit(node);
-          if (resolved !== undefined) record(node, resolved);
-          break;
-        }
-        // Only the OUTERMOST matching node of a chain: `process.env.A` contains `process.env`,
-        // and both match, so without the parent check one access counted twice (0.2.0). Pinned by
-        // 'one access chain is one occurrence' in banned-syntax.test.ts.
-        if (
-          ts.isPropertyAccessExpression(node) &&
-          dottedMatches(params.target ?? '', node.getText(source)) &&
-          !(
-            ts.isPropertyAccessExpression(node.parent) &&
-            node.parent.expression === node &&
-            dottedMatches(params.target ?? '', node.parent.getText(source))
-          )
-        ) {
-          record(node, node.getText(source));
-        } else if (
-          ts.isIdentifier(node) &&
-          node.text === params.target &&
-          !ts.isPropertyAccessExpression(node.parent)
-        ) {
-          record(node, node.text);
-        }
-        break;
-      }
-      case 'new-expression': {
-        if (!ts.isNewExpression(node)) break;
-        if (bySymbol) {
-          const resolved = symbolHit(node.expression);
-          if (resolved !== undefined) record(node, `new ${resolved}()`);
-          break;
-        }
-        if (node.expression.getText(source) === params.target) {
-          record(node, `new ${params.target}()`);
-        }
-        break;
-      }
-      // A call is defined by what the callee RESOLVES to, which is the whole reason #7 came
-      // first: before it, `fetch` aliased to anything evaded the ban.
-      case 'call': {
-        if (!ts.isCallExpression(node)) break;
-        const resolved = symbolHit(node.expression);
-        if (resolved !== undefined) record(node, `${resolved}()`);
-        break;
-      }
-
-      // Broader than `call`: any READ of the symbol, so `process.env` passed as an argument is
-      // caught as well as `process.env.KEY` being read. The outermost node of a chain only.
-      case 'reference': {
-        if (!ts.isIdentifier(node) && !ts.isPropertyAccessExpression(node)) break;
-        const resolved = symbolHit(node);
-        if (resolved === undefined) break;
-        // The outermost MATCHING node, not the outermost node. A ban on `process.env` has to fire
-        // on `process.env.MODE`, where the whole chain resolves to `...env.MODE` and so does not
-        // match — suppressing the inner node for merely having a parent would find nothing at
-        // all. It is suppressed only when the parent matches too, which is the real double count.
-        const parent = node.parent;
-        const covered =
-          ts.isPropertyAccessExpression(parent) &&
-          parent.expression === node &&
-          symbolHit(parent) !== undefined;
-        if (covered) break;
-        record(node, resolved);
-        break;
-      }
-
-      // A string the reader can act on. A specifier in `import 'x'` and a string inside a literal
-      // type are neither hard-coded values nor things a remedy can move, and reporting them would
-      // make this selector unusable in a real repository.
-      case 'string-literal': {
-        if (!ts.isStringLiteralLike(node)) break;
-        if (params.pattern === undefined) break;
-        if (isImportSpecifierText(node) || isTypePosition(node)) break;
-        if (!matchesPattern(params.pattern, node.text)) break;
-        record(node, node.text);
-        break;
-      }
-
-      // Top-level `let` or `var`, and an exported binding that is not const. It bans a SHAPE, so
-      // it reads no target: module state is hard to test and hard to swap whatever it is called.
-      case 'module-mutable-state': {
-        if (!ts.isVariableStatement(node)) break;
-        if (!ts.isSourceFile(node.parent)) break;
-        const flags = node.declarationList.flags;
-        if ((flags & ts.NodeFlags.Const) !== 0) break;
-        const keyword = (flags & ts.NodeFlags.Let) !== 0 ? 'let' : 'var';
-        const first = node.declarationList.declarations[0];
-        const name = first === undefined ? '' : first.name.getText(source);
-        record(node, `${keyword} ${name}`);
-        break;
-      }
-
-      case 'string-literal-comparison':
-        if (
-          ts.isBinaryExpression(node) &&
-          (node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken ||
-            node.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken) &&
-          (ts.isStringLiteralLike(node.left) || ts.isStringLiteralLike(node.right))
-        ) {
-          record(node, node.getText(source).slice(0, 60));
-        }
-        break;
-      case 'empty-catch':
-        // A block holding only a comment is an EXPLAINED silence, which the rule allows. Counting
-        // statements alone flags it, and found two false positives in archcheck's own source the
-        // first time it checked itself.
-        if (
-          ts.isCatchClause(node) &&
-          node.block.statements.length === 0 &&
-          node.block.getText(source).replace(/[{}\s]/g, '').length === 0
-        ) {
-          record(node, 'catch {}');
-        }
-        break;
-      case 'computed-dynamic-import':
-      case 'suppression-comment':
-        // Handled outside the AST walk: one from the graph, one from the comment scanner.
-        break;
-    }
-    ts.forEachChild(node, visit);
-  };
-
-  ts.forEachChild(source, visit);
-}
-
 /**
- * Comment trivia only, read from the parsed AST rather than a hand-driven scanner.
+ * The question this rule asks of the graph, or undefined when it asks nothing.
  *
- * Reading raw lines instead looks equivalent and is not: it matches the words wherever they appear,
- * including inside the very pattern above. That false positive is how this function was found — by
- * archcheck flagging this file on its first self-host run.
+ * `computed-dynamic-import` is the one that asks nothing: the graph reader already reports a
+ * computed specifier as an edge, because a dynamic import that resolves to nothing is exactly how
+ * a layer violation hides, and re-detecting it would be a second implementation of the one thing
+ * that is hard to get right.
  *
- * A bare `ts.createScanner` is not enough either. Whether `}` resumes a template and whether `/`
- * opens a regex depends on the grammar, which only the parser knows; a scanner driven without it
- * mis-tokenized everything after the first `${...}` substitution, and 0.2.0 missed every later
- * comment. So walk every TOKEN of the tree the parser already built: every comment is trivia
- * in front of exactly one token (the last ones in front of the end-of-file token), so reading each
- * token's comment ranges finds all of them, once each. Pinned by the template, nested-template and
- * regex cases in banned-syntax.test.ts.
+ * A `pattern` is deliberately NOT part of the request. Which strings matter is this rule's
+ * decision, applied below; keeping it out means editing the pattern does not invalidate a cache
+ * entry, and two rules with different patterns share one collection pass.
  */
-function scanComments(source: ts.SourceFile, found: BannedOccurrence[]): void {
-  const text = source.getFullText();
-  const seen = new Set<number>();
-  const visit = (node: ts.Node): void => {
-    // A JSDoc node's range lies INSIDE a comment, and JSX text is text, not trivia. Neither has
-    // leading comments of its own; the JSDoc comment itself is the next token's leading trivia.
-    if (ts.isJSDoc(node) || node.kind === ts.SyntaxKind.JsxText) return;
-    const children = node.getChildren(source);
-    if (children.length > 0) {
-      for (const child of children) visit(child);
-      return;
-    }
-    // The compiler splits one token's trivia in two: comments on the line the previous token
-    // ended on are "trailing", the rest "leading". Both halves, or a suppression written at the
-    // end of a code line goes unseen. At position 0 the two overlap, hence `seen`.
-    const ranges = [
-      ...(ts.getTrailingCommentRanges(text, node.pos) ?? []),
-      ...(ts.getLeadingCommentRanges(text, node.pos) ?? []),
-    ];
-    for (const range of ranges) {
-      if (seen.has(range.pos)) continue;
-      seen.add(range.pos);
-      const comment = text.slice(range.pos, range.end);
-      if (!SUPPRESSION.test(comment)) continue;
-      const { line, character } = source.getLineAndCharacterOfPosition(range.pos);
-      found.push({ line: line + 1, col: character + 1, snippet: comment.trim().slice(0, 60) });
-    }
-  };
-  visit(source);
+export function bannedSyntaxRequest(params: BannedSyntaxParams): SyntaxRequest | undefined {
+  if (params.selector === 'computed-dynamic-import') return undefined;
+  if (!NEEDS_TARGET.has(params.selector)) return { construct: params.selector };
+  return { construct: params.selector, target: params.target ?? '' };
 }
 
 /**
- * Occurrences of the banned construct in one file.
+ * Occurrences of the banned construct in one file, read from the facts the graph collected.
  *
- * `computedImports` comes from the graph reader, which already detects a computed dynamic import —
- * re-detecting it here would be a second implementation of the one thing that is hard to get right.
+ * A missing key is not an empty one. `facts` without this rule's key means the run never asked the
+ * question — a different thing from asking and finding nothing — so the caller gets nothing rather
+ * than a clean verdict it has not earned.
  */
 export function findBannedOccurrences(
   params: BannedSyntaxParams,
-  source: ts.SourceFile | undefined,
+  facts: SyntaxFacts | undefined,
   computedImports: readonly Edge[],
-  checker?: ts.TypeChecker,
 ): BannedOccurrence[] {
-  const found: BannedOccurrence[] = [];
   if (params.selector === 'computed-dynamic-import') {
-    for (const edge of computedImports) {
-      found.push({ line: edge.line, col: edge.col, snippet: `import(${edge.specifier})` });
-    }
-    return found;
+    return computedImports.map((edge) => ({
+      line: edge.line,
+      col: edge.col,
+      snippet: `import(${edge.specifier})`,
+    }));
   }
-  if (source === undefined) return found;
-  if (params.selector === 'suppression-comment') {
-    scanComments(source, found);
-    return found;
-  }
-  scanAst(params, source, found, checker);
-  return found;
+  const request = bannedSyntaxRequest(params);
+  if (request === undefined) return [];
+  const found = facts?.[requestKey(request)] ?? [];
+  if (params.selector !== 'string-literal') return found;
+  const pattern = params.pattern;
+  if (pattern === undefined) return [];
+  return found.filter((occurrence) => matchesPattern(pattern, occurrence.snippet));
 }
 
 function validateParams(rule: Rule, _ctx: ValidateCtx): Result<void> {

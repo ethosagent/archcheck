@@ -533,6 +533,37 @@ describe('--write-graph then --ingest-graph', () => {
     });
   });
 
+  /**
+   * The AST kinds, which is the case the layered fixture cannot cover.
+   *
+   * Until 0.3.2 `banned-syntax` and `declared-field` walked the AST inside the contract, and an
+   * ingested graph has facts rather than source files — so on this lane both kinds found nothing,
+   * reported no skip, and the run read as clean. The parity test above passed throughout, because
+   * the layered fixture declares neither kind. This is the test that would have caught it.
+   */
+  test('the AST kinds find the same violations on the ingested lane', () => {
+    // One fixture per AST kind, with the rule that proves the kind actually ran.
+    const lanes = [
+      { fixture: 'lint', ruleId: 'no-empty-catch' },
+      { fixture: 'structure', ruleId: 'endpoints-declare-a-permission' },
+    ];
+    for (const lane of lanes) {
+      inCopyOf(lane.fixture, (root) => {
+        const direct = JSON.parse(archcheck(['--cwd', root, '--format', 'json']).stdout);
+        // The fixture has to have something to find, or parity is a comparison of two silences.
+        const fired = direct.diagnostics.map((one: { ruleId: string }) => one.ruleId);
+        expect(fired).toContain(lane.ruleId);
+
+        archcheck(['--cwd', root, '--write-graph', '--format', 'json']);
+        const ingested = JSON.parse(
+          archcheck(['--cwd', root, '--ingest-graph', '--format', 'json']).stdout,
+        );
+        expect(ingested.skipped).toEqual([]);
+        expect(ingested.diagnostics).toEqual(direct.diagnostics);
+      });
+    }
+  });
+
   test('asking to both write and ingest is a config error, not a coin toss', () => {
     const { code, stderr } = archcheck([
       '--cwd',

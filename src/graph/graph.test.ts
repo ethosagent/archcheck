@@ -4,12 +4,13 @@ import { join } from 'node:path';
 import { repoRelative } from '../util/paths.js';
 import { readGraph } from './index.js';
 import { fileMatches } from './match.js';
+import { requestKey, type SyntaxRequest } from './syntaxRequest.js';
 
 const ROOT = join(import.meta.dir, '..', '..', 'fixtures', 'repos', 'imports');
 const TSCONFIG = join(ROOT, 'tsconfig.json');
 
-function graph(cache: boolean) {
-  const result = readGraph({ root: ROOT, tsconfigPath: TSCONFIG, cache });
+function graph(cache: boolean, syntax: readonly SyntaxRequest[] = []) {
+  const result = readGraph({ root: ROOT, tsconfigPath: TSCONFIG, cache, syntax });
   if (!result.ok) throw new Error(result.error.join('\n'));
   return result.value;
 }
@@ -122,6 +123,47 @@ describe('the cache', () => {
   test('cache off means every file is walked, every time', () => {
     expect(graph(false).walkedCount).toBeGreaterThan(0);
     expect(graph(false).walkedCount).toBe(graph(false).files.length);
+  });
+});
+
+describe('the cache covers the AST rules too', () => {
+  const LITERALS: SyntaxRequest = { construct: 'string-literal' };
+  const key = requestKey(LITERALS);
+  const literalsIn = (g: ReturnType<typeof graph>) =>
+    g.files.flatMap((file) => (g.factsFor(file)?.syntax?.[key] ?? []).map((one) => one.snippet));
+
+  beforeEach(() => {
+    rmSync(join(ROOT, '.archcheck'), { recursive: true, force: true });
+  });
+
+  test('a warm run serves the syntax facts without walking a file', () => {
+    // The claim the ticket makes measurable: before 0.3.2 every AST rule re-walked every file on
+    // every run, because the facts cache held edges and exports only.
+    const first = graph(true, [LITERALS]);
+    expect(first.walkedCount).toBe(first.files.length);
+    const found = literalsIn(first);
+    expect(found.length).toBeGreaterThan(0);
+
+    const second = graph(true, [LITERALS]);
+    expect(second.walkedCount).toBe(0);
+    expect(literalsIn(second)).toEqual(found);
+  });
+
+  test('a different question throws the cache away rather than answering the old one', () => {
+    // A stale answer here reads as a clean file, which is the worst way for this to fail.
+    const first = graph(true, [LITERALS]);
+    expect(first.walkedCount).toBeGreaterThan(0);
+
+    const other = graph(true, [{ construct: 'empty-catch' }]);
+    expect(other.walkedCount).toBe(other.files.length);
+    expect(other.files.every((file) => other.factsFor(file)?.syntax?.[key] === undefined)).toBe(
+      true,
+    );
+  });
+
+  test('asking nothing stores nothing, so an edges-only run keeps its cache small', () => {
+    const only = graph(true, []);
+    expect(only.files.every((file) => only.factsFor(file)?.syntax === undefined)).toBe(true);
   });
 });
 

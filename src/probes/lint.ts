@@ -6,9 +6,10 @@
  * archcheck; and our findings carry evidence — the symbol, the module, the snippet — that a linter's
  * report cannot express, and that the identity hash needs.
  *
- * What a caller must know: `run()` needs a real program, because `banned-syntax` reads the AST.
- * `ingest()` is the other half — an external linter's report, mapped back by rule id, for the CI
- * lane that already ran one.
+ * What a caller must know: `run()` needs no program. `banned-syntax` reads the syntax facts the
+ * graph collected, so an ingested graph runs the kind exactly as a direct read does. `ingest()` is
+ * a different thing again — an external linter's report, mapped back by rule id, for the CI lane
+ * that already ran one.
  */
 import {
   asBannedSyntaxParams,
@@ -98,9 +99,8 @@ function evaluate(ctx: RunCtx, graph: ModuleGraph): RawFinding[] {
       if (!bannedSyntaxApplies(params, relative)) continue;
       const occurrences = findBannedOccurrences(
         params,
-        graph.sourceFileFor(file),
+        graph.factsFor(file)?.syntax,
         computedByFile.get(file) ?? [],
-        graph.checker,
       );
       for (const occurrence of occurrences) {
         findings.push({

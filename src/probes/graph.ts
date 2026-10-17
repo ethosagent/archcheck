@@ -15,6 +15,7 @@ import { asEncapsulationParams, resolveEncapsulation } from '../contracts/encaps
 import { asForbiddenParams, forbiddenApplies } from '../contracts/forbidden.js';
 import { buildLayerTable, type Layer, resolveEdge } from '../contracts/layers.js';
 import { fileMatches } from '../graph/match.js';
+import type { SyntaxFacts } from '../graph/syntax.js';
 import type { Edge, FileFacts, ModuleGraph } from '../graph/types.js';
 import type { RawFinding } from '../types.js';
 import { repoRelative } from '../util/paths.js';
@@ -23,13 +24,19 @@ import type { Probe, RunCtx, Skip } from './types.js';
 
 export const GRAPH_REPORT_PATH = '.archcheck/graph.json';
 
-/** What CI writes once and every other gate reads. Edges without their AST nodes. */
+/**
+ * What CI writes once and every other gate reads. Edges without their AST nodes.
+ *
+ * `syntax` is here so an ingested run evaluates all eight kinds. Without it `banned-syntax` and
+ * `declared-field` found nothing on an ingested graph and reported no skip, which reads as a clean
+ * repository — the quietest failure this tool can have.
+ */
 export type GraphReport = {
   schemaVersion: 1;
   root: string;
   files: string[];
   edges: Omit<Edge, 'node'>[];
-  facts: Record<string, { implementsPorts: string[]; exports: string[] }>;
+  facts: Record<string, { implementsPorts: string[]; exports: string[]; syntax?: SyntaxFacts }>;
 };
 
 export function toGraphReport(graph: ModuleGraph, root: string): GraphReport {
@@ -39,6 +46,7 @@ export function toGraphReport(graph: ModuleGraph, root: string): GraphReport {
     facts[repoRelative(root, file)] = {
       implementsPorts: fileFacts?.implementsPorts ?? [],
       exports: fileFacts?.exports ?? [],
+      ...(fileFacts?.syntax === undefined ? {} : { syntax: fileFacts.syntax }),
     };
   }
   return {
@@ -68,6 +76,7 @@ export function fromGraphReport(report: GraphReport, root: string): ModuleGraph 
       edges: [],
       implementsPorts: entry.implementsPorts,
       exports: entry.exports,
+      ...(entry.syntax === undefined ? {} : { syntax: entry.syntax }),
     });
   }
   const edges: Edge[] = report.edges.map((edge) => ({
@@ -83,8 +92,6 @@ export function fromGraphReport(report: GraphReport, root: string): ModuleGraph 
     files: report.files.map(absolute),
     edges,
     factsFor: (file) => facts.get(file),
-    // A graph restored from a report has no parsed sources; nothing that needs an AST may use it.
-    sourceFileFor: () => undefined,
     walkedCount: 0,
   };
 }

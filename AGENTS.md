@@ -316,10 +316,10 @@ Enforced by `scripts/check-lint.sh`.
 |---|---|
 | `src/types.ts`, `result.ts`, `version.ts` | the kernel. Imports nothing, not even TypeScript |
 | `src/util/` | pure helpers. Imports the kernel only |
-| `src/graph/` | the module graph, read with the TypeScript compiler API. Reports facts, evaluates nothing |
+| `src/graph/` | the module graph and the syntax facts, read with the TypeScript compiler API. Reports facts, evaluates nothing |
 | `src/contracts/` | one file per rule kind: `validate`, `emit`, `explain`, `refine`, `warn` |
 | `src/registry/` | loads and validates the manifest. Knows a rule has a kind, never what a kind means |
-| `src/probes/` | runs rules against the graph, the AST, or the filesystem. Returns evidence, never prose |
+| `src/probes/` | runs rules against the graph facts or the filesystem. Returns evidence, never prose |
 | `src/normalize/` | `RawFinding` + `Rule` → `Diagnostic`, and the identity hash |
 | `src/report/` | terminal, json, sarif, verdict. Reads a `RunResult` and nothing else |
 | `src/emit/` | fragments merged per sink, with a generated header |

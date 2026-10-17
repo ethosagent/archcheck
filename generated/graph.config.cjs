@@ -34,6 +34,11 @@ module.exports = {
     },
     {
       "catchesUnlayered": false,
+      "externals": {
+        "deny": [
+          "typescript"
+        ]
+      },
       "ignoreTypeOnly": false,
       "layer": "contract",
       "match": "src/contracts/**",
