@@ -16,6 +16,7 @@ import {
   findMissingDeclarations,
 } from '../contracts/declared-field.js';
 import { asRequiredFileParams, isRuleSelector, subjectsFor } from '../contracts/required-file.js';
+import { dirGlobOf } from '../contracts/requiredDirs.js';
 import type { ModuleGraph } from '../graph/types.js';
 import type { RawFinding } from '../types.js';
 import { repoRelative } from '../util/paths.js';
@@ -29,13 +30,19 @@ function requiredFileFindings(ctx: RunCtx): RawFinding[] {
 
   for (const rule of rules) {
     const params = asRequiredFileParams(rule);
-    // A rule selector iterates the registry; anything else iterates the filesystem.
-    const files = isRuleSelector(params.forEach) ? [] : ctx.fs.glob(params.forEach);
+    // A rule selector iterates the registry. A directory selector globs the files BELOW each
+    // directory, because `ctx.fs.glob` lists files and a directory is found from what it holds.
+    // Anything else iterates the files it matches.
+    const dirGlob = dirGlobOf(params.forEach);
+    const files = isRuleSelector(params.forEach)
+      ? []
+      : ctx.fs.glob(dirGlob === undefined ? params.forEach : `${dirGlob}/**`);
     for (const subject of subjectsFor(params, { rules: ctx.rules, files })) {
       const present = subject.expected.includes('*')
         ? ctx.fs.glob(subject.expected).length > 0
         : ctx.fs.exists(subject.expected);
-      if (present) continue;
+      // mustNotExist keeps the subject list and flips which answer is the violation.
+      if (params.mustNotExist === true ? !present : present) continue;
       findings.push({
         ruleId: rule.id,
         // The subject, not the searched directory. A rule subject has no file of its own, so the
@@ -45,6 +52,7 @@ function requiredFileFindings(ctx: RunCtx): RawFinding[] {
           subject: subject.subject,
           expected: subject.expected,
           label: subject.label,
+          ...(params.mustNotExist === true ? { mustNotExist: true } : {}),
         },
         identity: '',
       });
