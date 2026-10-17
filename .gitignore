@@ -3,8 +3,13 @@ dist/
 *.tsbuildinfo
 
 # Emitted, gitignored half of .archcheck — the ledger and the baseline beside it ARE committed.
-.archcheck/cache/
-.archcheck/graph.json
+#
+# The leading `**/` is load-bearing. A pattern containing a slash is anchored to the directory
+# holding the .gitignore, so `.archcheck/cache/` matched the repository root and NOTHING else —
+# which is how examples/minimal-service/.archcheck/cache/facts.json came to be committed, and why
+# every test run then left the working tree dirty.
+**/.archcheck/cache/
+**/.archcheck/graph.json
 
 # Test runs leave these inside the fixture repos.
 fixtures/**/.archcheck/
