@@ -190,7 +190,38 @@ discovered later:
 So the editor is quieter than the gate, never louder. **archcheck stays the gate**, and the two
 never disagree about what is allowed.
 
-Biome is not covered yet.
+#### And in Biome
+
+`archcheck/biome` turns the same sink into a Biome config fragment. Biome has no `extends` for a
+computed value, so write the fragment once and list the file in `extends`:
+
+```js
+// scripts/biome-config.mjs
+import { writeFileSync } from 'node:fs';
+import { archcheckBiomeOverrides } from 'archcheck/biome';
+
+writeFileSync('biome.generated.json', `${JSON.stringify(archcheckBiomeOverrides(), null, 2)}\n`);
+```
+
+```json
+{
+  "extends": ["./biome.generated.json"]
+}
+```
+
+**Biome shows less than ESLint does**, and the gap is worth knowing before you rely on it:
+
+| | |
+|---|---|
+| **An import ban** | shown, as `style/noRestrictedImports`, carrying your sentence. It matches the specifier as written, so the relative-import limit above applies here too |
+| **A ban on a whole global** | shown, as `style/noRestrictedGlobals`. Biome writes its own headline and attaches your sentence as the note |
+| **A ban on one member of a global** | **not shown.** `console.log` would need `noJsRestrictedProperties`, which is in Biome's nursery. The generated file is committed, so an unstable rule in it could break your lint config on a Biome upgrade |
+| **An empty catch** | **not shown**, although ESLint shows it. Biome's `noEmptyBlockStatements` has no catch scope, so it would flag every empty block — louder than the gate, which is the one thing an adapter must never be |
+| **Everything else** | **not shown.** Biome has no filename rule, nothing that reads comment text, and nothing like `no-restricted-syntax` |
+
+Each generated file names what each tool could not express, under
+`$generated.notExpressedByEslint` and `$generated.notExpressedByBiome`. The two lists differ, so
+they are reported separately rather than merged.
 
 ### Step 5 — add two scripts and one CI step
 
