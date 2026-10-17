@@ -140,6 +140,33 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
     return layerCache.get(file);
   };
 
+  type Axis = (typeof extraAxes)[number];
+  const axisLayerOf = (axis: Axis, file: string): Layer | undefined => {
+    if (!axis.cache.has(file)) {
+      axis.cache.set(file, layerOf(axis.table.layers, file, ctx.root, graph));
+    }
+    return axis.cache.get(file);
+  };
+
+  /**
+   * The layer this file sits in on EVERY axis, which is what a `forbidden` side reads.
+   *
+   * A side names a dimension and a layer name, and `layer` is simply the default dimension — so a
+   * rule that reads one axis and a rule that combines two go through the same lookup. Memoised per
+   * file because each edge asks twice, once for each end.
+   */
+  const nameCache = new Map<string, Record<string, string | undefined>>();
+  const layerNamesFor = (file: string): Record<string, string | undefined> => {
+    const already = nameCache.get(file);
+    if (already !== undefined) return already;
+    const names: Record<string, string | undefined> = {
+      [DEFAULT_DIMENSION]: layerFor(file)?.name,
+    };
+    for (const axis of extraAxes) names[axis.table.dimension] = axisLayerOf(axis, file)?.name;
+    nameCache.set(file, names);
+    return names;
+  };
+
   for (const edge of graph.edges) {
     if (!inScope(edge.from)) continue;
 
@@ -182,8 +209,12 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
       if (!edgeInScope(params.edges ?? 'all', fromIsTest)) continue;
       const banned = forbiddenApplies(
         params,
-        { path: fromPath, layer: from?.name, external: false },
-        { path: toPath, layer: to?.name, external: edge.external },
+        { path: fromPath, external: false, layers: layerNamesFor(edge.from) },
+        {
+          path: toPath,
+          external: edge.external,
+          layers: edge.external ? {} : layerNamesFor(edge.to),
+        },
       );
       if (!banned) continue;
       findings.push({
@@ -197,14 +228,8 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
     }
 
     for (const axis of extraAxes) {
-      const axisLayerFor = (file: string): Layer | undefined => {
-        if (!axis.cache.has(file)) {
-          axis.cache.set(file, layerOf(axis.table.layers, file, ctx.root, graph));
-        }
-        return axis.cache.get(file);
-      };
-      const axisFrom = axisLayerFor(edge.from);
-      const axisTo = edge.external ? undefined : axisLayerFor(edge.to);
+      const axisFrom = axisLayerOf(axis, edge.from);
+      const axisTo = edge.external ? undefined : axisLayerOf(axis, edge.to);
       const axisVerdict = resolveEdge(
         axis.table,
         axisFrom,

@@ -34,6 +34,14 @@ export {
   forbiddenContract,
 } from './forbidden.js';
 export {
+  dimensionProblems,
+  dimensionsOfSide,
+  type LayerNames,
+  RESERVED_SIDE_KEYS,
+  type SideLike,
+  sideDimensionsMatch,
+} from './forbiddenDimensions.js';
+export {
   type EdgeFacts,
   type ForbiddenSide,
   type ForbiddenTarget,

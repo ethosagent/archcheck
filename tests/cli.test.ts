@@ -132,20 +132,25 @@ describe('sibling units inside one layer', () => {
 
 describe('the forbidden kind', () => {
   /**
-   * Four bans, one fixture: layer to layer, glob to glob, an external package, and an `except`
-   * carve-out that must stay silent. The carve-out is the one worth a test of its own — a rule
-   * that bans more than it says is as broken as one that bans nothing.
+   * Five bans, one fixture: layer to layer, glob to glob, an external package, a cross-DIMENSION
+   * ban, and an `except` carve-out that must stay silent. The carve-out is the one worth a test of
+   * its own — a rule that bans more than it says is as broken as one that bans nothing.
    */
-  test('bans a layer edge, a path edge and a package, and honours except', () => {
+  test('bans a layer edge, a path edge, a package and a runtime edge, and honours except', () => {
     const { code, stdout } = archcheck(['--cwd', fixture('forbidden')]);
     expect(code).toBe(1);
-    expect(stdout).toContain('4 deterministic');
+    expect(stdout).toContain('5 deterministic');
     expect(stdout).toContain('src/cart/direct.ts may not import ../payments/sdk.js');
     expect(stdout).toContain('src/checkout/index.ts may not import ../payments/sdk.js');
     expect(stdout).toContain('src/checkout/report.ts may not import lodash/fp.js');
     expect(stdout).toContain('src/cart/reach.ts may not import ../checkout/index.js');
+    // The second axis: client code may not call a server module in process.
+    expect(stdout).toContain('src/widget/view.ts may not import ../handler/api.js');
     // src/legacy/allowed.ts imports the checkout too, and is excepted.
     expect(stdout).not.toContain('src/legacy/allowed.ts');
+    // server to server is the same runtime, so the ban is silent there — a cross-dimension rule
+    // that fires on both directions would be banning the axis, not the edge across it.
+    expect(stdout).not.toContain('src/handler/inner.ts');
   });
 });
 
