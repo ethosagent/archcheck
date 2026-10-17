@@ -7,6 +7,8 @@
  * files start drifting from the manifest — which is the one failure this whole pipeline exists to
  * prevent.
  */
+
+import { type SinkEntry, toEslintConfig } from '../adapters/eslintConfig.js';
 import type { Fragment, FragmentTarget } from '../types.js';
 import { commentHeader, generatedMeta } from './header.js';
 
@@ -41,11 +43,22 @@ export function sortDeep(value: unknown): unknown {
 
 function jsonSink(target: FragmentTarget, fragments: Fragment[], source: string): SinkFile {
   const ruleIds = [...new Set(fragments.map((f) => f.ruleId))].sort();
+  const rules = fragments
+    .map((fragment) => ({ ruleId: fragment.ruleId, ...(fragment.content as object) }))
+    .sort((a, b) => a.ruleId.localeCompare(b.ruleId));
+
+  // What the editor adapter could NOT turn into a rule. A reader who sees a rule in this file
+  // would otherwise assume their editor shows it, and for two kinds it cannot: core ESLint has no
+  // filename rule and none that reads comment text. Naming them is why archcheck stays the gate.
+  const unexpressed =
+    target === 'lint' ? toEslintConfig(rules as unknown as SinkEntry[]).unexpressed : [];
+
   const body = {
-    $generated: generatedMeta(source, ruleIds),
-    rules: fragments
-      .map((fragment) => ({ ruleId: fragment.ruleId, ...(fragment.content as object) }))
-      .sort((a, b) => a.ruleId.localeCompare(b.ruleId)),
+    $generated: {
+      ...generatedMeta(source, ruleIds),
+      ...(unexpressed.length === 0 ? {} : { notExpressedByEslint: unexpressed }),
+    },
+    rules,
   };
   return {
     path: SINK_PATHS[target],

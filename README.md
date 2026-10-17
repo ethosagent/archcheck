@@ -160,6 +160,38 @@ own sentence:
 
 > `domain may not import services — invert the call: the service calls the domain`
 
+
+#### What your editor actually shows
+
+`archcheck/eslint` turns the generated lint sink into ESLint flat config:
+
+```js
+// eslint.config.js
+import { archcheckEslintBlocks } from 'archcheck/eslint';
+
+export default [...archcheckEslintBlocks()];
+```
+
+An import your architecture forbids is then flagged as you type, with your own sentence:
+
+```
+error  'src/service/write.js' import is restricted from being used by a pattern.
+       the domain decides, and never calls a service — invert the call: the service calls the domain
+```
+
+**It shows less than archcheck does, and that is deliberate.** Two limits, stated here rather than
+discovered later:
+
+| | |
+|---|---|
+| **Relative imports are not flagged** | `no-restricted-imports` matches the specifier as written. A pattern of `src/service/**` catches `import 'src/service/x.js'` and does **not** catch `import '../service/x.js'` |
+| **Two kinds cannot be expressed at all** | core ESLint has no filename rule, and none that reads comment text. Each generated file names what it could not express, under `$generated.notExpressedByEslint` |
+
+So the editor is quieter than the gate, never louder. **archcheck stays the gate**, and the two
+never disagree about what is allowed.
+
+Biome is not covered yet.
+
 ### Step 5 — add two scripts and one CI step
 
 Add these lines to `package.json`:

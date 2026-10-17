@@ -14,10 +14,11 @@ and the percentage goes down, in the same commit.
 
 <!-- archcheck:begin rules-table -->
 
-**25 rules** · ✓ 24 deterministic · ◑ 1 proxy · ○ 0 judgement · **100% automatable**
+**26 rules** · ✓ 25 deterministic · ◑ 1 proxy · ○ 0 judgement · **100% automatable**
 
 | | Rule | Statement | Kind | Severity |
 |---|---|---|---|---|
+| ✓ | `an-adapter-translates-and-decides-nothing` | an adapter turns a generated sink into another tool shape, and judges nothing | layers | error |
 | ✓ | `cli-owns-no-behaviour` | the CLI parses arguments, calls the facade and picks a reporter — nothing else | layers | error |
 | ✓ | `contracts-know-no-probe` | a contract kind decides, emits and explains — it never runs anything | layers | error |
 | ✓ | `coverage-is-computed-from-rules-alone` | coverage counts rules and renders a table, and checks nothing | layers | error |

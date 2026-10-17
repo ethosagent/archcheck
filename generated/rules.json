@@ -1,14 +1,23 @@
 {
   "schemaVersion": 1,
   "coverage": {
-    "total": 25,
-    "deterministic": 24,
+    "total": 26,
+    "deterministic": 25,
     "proxy": 1,
     "model": 0,
     "unchecked": 0,
     "automatable": 100
   },
   "rules": [
+    {
+      "id": "an-adapter-translates-and-decides-nothing",
+      "kind": "layers",
+      "statement": "an adapter turns a generated sink into another tool shape, and judges nothing",
+      "severity": "error",
+      "confidence": "deterministic",
+      "mark": "✓",
+      "remedy": "it only translates; a rule about what is allowed belongs in the manifest"
+    },
     {
       "id": "cli-owns-no-behaviour",
       "kind": "layers",

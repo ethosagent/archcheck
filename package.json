@@ -8,7 +8,8 @@
     "archcheck": "./dist/cli/index.js"
   },
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./eslint": "./dist/adapters/eslint.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

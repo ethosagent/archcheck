@@ -2,8 +2,13 @@
   "$generated": {
     "by": "archcheck",
     "doNotEdit": true,
+    "notExpressedByEslint": [
+      "filenames-are-camel-case-or-kebab",
+      "no-inline-suppression"
+    ],
     "regenerate": "npx archcheck emit",
     "rules": [
+      "an-adapter-translates-and-decides-nothing",
       "cli-owns-no-behaviour",
       "contracts-know-no-probe",
       "coverage-is-computed-from-rules-alone",
@@ -33,10 +38,61 @@
   "rules": [
     {
       "files": [
+        "src/adapters/**"
+      ],
+      "forbid": "import-path-matching",
+      "forbiddenLayers": [
+        "baseline",
+        "cli",
+        "contract",
+        "coverage",
+        "emit",
+        "exception",
+        "facade",
+        "fixtures",
+        "fs",
+        "graph",
+        "init",
+        "manifest",
+        "normalize",
+        "probe",
+        "registry",
+        "report",
+        "test",
+        "util"
+      ],
+      "message": "an adapter turns a generated sink into another tool shape, and judges nothing — it only translates; a rule about what is allowed belongs in the manifest",
+      "patterns": [
+        "architecture.config.ts",
+        "src/**/*.test.ts",
+        "src/archcheck.ts",
+        "src/baseline/**",
+        "src/cli/**",
+        "src/contracts/**",
+        "src/coverage/**",
+        "src/emit/**",
+        "src/exceptions/**",
+        "src/fixtures/**",
+        "src/fs/**",
+        "src/graph/**",
+        "src/index.ts",
+        "src/init/**",
+        "src/normalize/**",
+        "src/probes/**",
+        "src/registry/**",
+        "src/report/**",
+        "src/util/**",
+        "tests/**"
+      ],
+      "ruleId": "an-adapter-translates-and-decides-nothing"
+    },
+    {
+      "files": [
         "src/cli/**"
       ],
       "forbid": "import-path-matching",
       "forbiddenLayers": [
+        "adapter",
         "baseline",
         "contract",
         "exception",
@@ -54,6 +110,7 @@
       "patterns": [
         "architecture.config.ts",
         "src/**/*.test.ts",
+        "src/adapters/**",
         "src/baseline/**",
         "src/contracts/**",
         "src/exceptions/**",
@@ -74,6 +131,7 @@
       ],
       "forbid": "import-path-matching",
       "forbiddenLayers": [
+        "adapter",
         "baseline",
         "cli",
         "coverage",
@@ -94,6 +152,7 @@
       "patterns": [
         "architecture.config.ts",
         "src/**/*.test.ts",
+        "src/adapters/**",
         "src/archcheck.ts",
         "src/baseline/**",
         "src/cli/**",
@@ -118,6 +177,7 @@
       ],
       "forbid": "import-path-matching",
       "forbiddenLayers": [
+        "adapter",
         "baseline",
         "cli",
         "contract",
@@ -140,6 +200,7 @@
       "patterns": [
         "architecture.config.ts",
         "src/**/*.test.ts",
+        "src/adapters/**",
         "src/archcheck.ts",
         "src/baseline/**",
         "src/cli/**",
@@ -206,6 +267,7 @@
       ],
       "forbid": "import-path-matching",
       "forbiddenLayers": [
+        "adapter",
         "baseline",
         "cli",
         "contract",
@@ -227,6 +289,7 @@
       "patterns": [
         "architecture.config.ts",
         "src/**/*.test.ts",
+        "src/adapters/**",
         "src/archcheck.ts",
         "src/baseline/**",
         "src/cli/**",
@@ -263,6 +326,7 @@
       ],
       "forbid": "import-path-matching",
       "forbiddenLayers": [
+        "adapter",
         "baseline",
         "cli",
         "contract",
@@ -284,6 +348,7 @@
       "patterns": [
         "architecture.config.ts",
         "src/**/*.test.ts",
+        "src/adapters/**",
         "src/archcheck.ts",
         "src/baseline/**",
         "src/cli/**",
@@ -309,6 +374,7 @@
       ],
       "forbid": "import-path-matching",
       "forbiddenLayers": [
+        "adapter",
         "baseline",
         "cli",
         "contract",
@@ -330,6 +396,7 @@
       "patterns": [
         "architecture.config.ts",
         "src/**/*.test.ts",
+        "src/adapters/**",
         "src/archcheck.ts",
         "src/baseline/**",
         "src/cli/**",
@@ -355,6 +422,7 @@
       ],
       "forbid": "import-path-matching",
       "forbiddenLayers": [
+        "adapter",
         "baseline",
         "cli",
         "contract",
@@ -375,6 +443,7 @@
       "patterns": [
         "architecture.config.ts",
         "src/**/*.test.ts",
+        "src/adapters/**",
         "src/archcheck.ts",
         "src/baseline/**",
         "src/cli/**",
@@ -401,6 +470,7 @@
       ],
       "forbid": "import-path-matching",
       "forbiddenLayers": [
+        "adapter",
         "baseline",
         "cli",
         "contract",
@@ -424,6 +494,7 @@
       "patterns": [
         "architecture.config.ts",
         "src/**/*.test.ts",
+        "src/adapters/**",
         "src/archcheck.ts",
         "src/baseline/**",
         "src/cli/**",
@@ -493,6 +564,7 @@
       ],
       "forbid": "import-path-matching",
       "forbiddenLayers": [
+        "adapter",
         "baseline",
         "cli",
         "contract",
@@ -514,6 +586,7 @@
       "patterns": [
         "architecture.config.ts",
         "src/**/*.test.ts",
+        "src/adapters/**",
         "src/archcheck.ts",
         "src/baseline/**",
         "src/cli/**",
@@ -540,6 +613,7 @@
       ],
       "forbid": "import-path-matching",
       "forbiddenLayers": [
+        "adapter",
         "cli",
         "manifest",
         "test"
@@ -548,6 +622,7 @@
       "patterns": [
         "architecture.config.ts",
         "src/**/*.test.ts",
+        "src/adapters/**",
         "src/cli/**",
         "tests/**"
       ],
@@ -559,6 +634,7 @@
       ],
       "forbid": "import-path-matching",
       "forbiddenLayers": [
+        "adapter",
         "baseline",
         "cli",
         "coverage",
@@ -577,6 +653,7 @@
       "patterns": [
         "architecture.config.ts",
         "src/**/*.test.ts",
+        "src/adapters/**",
         "src/archcheck.ts",
         "src/baseline/**",
         "src/cli/**",
@@ -599,6 +676,7 @@
       ],
       "forbid": "import-path-matching",
       "forbiddenLayers": [
+        "adapter",
         "baseline",
         "cli",
         "contract",
@@ -619,6 +697,7 @@
       "patterns": [
         "architecture.config.ts",
         "src/**/*.test.ts",
+        "src/adapters/**",
         "src/archcheck.ts",
         "src/baseline/**",
         "src/cli/**",
@@ -643,6 +722,7 @@
       ],
       "forbid": "import-path-matching",
       "forbiddenLayers": [
+        "adapter",
         "baseline",
         "cli",
         "contract",
@@ -664,6 +744,7 @@
       "patterns": [
         "architecture.config.ts",
         "src/**/*.test.ts",
+        "src/adapters/**",
         "src/archcheck.ts",
         "src/baseline/**",
         "src/cli/**",
@@ -689,6 +770,7 @@
       ],
       "forbid": "import-path-matching",
       "forbiddenLayers": [
+        "adapter",
         "cli",
         "contract",
         "coverage",
@@ -711,6 +793,7 @@
       "patterns": [
         "architecture.config.ts",
         "src/**/*.test.ts",
+        "src/adapters/**",
         "src/archcheck.ts",
         "src/cli/**",
         "src/contracts/**",
@@ -737,6 +820,7 @@
       ],
       "forbid": "import-path-matching",
       "forbiddenLayers": [
+        "adapter",
         "baseline",
         "cli",
         "contract",
@@ -758,6 +842,7 @@
       "patterns": [
         "architecture.config.ts",
         "src/**/*.test.ts",
+        "src/adapters/**",
         "src/archcheck.ts",
         "src/baseline/**",
         "src/cli/**",
@@ -783,6 +868,7 @@
       ],
       "forbid": "import-path-matching",
       "forbiddenLayers": [
+        "adapter",
         "baseline",
         "cli",
         "contract",
@@ -804,6 +890,7 @@
       "message": "the manifest imports archcheck through its public surface, like any consumer — import from './src/index.js' — reaching inside would make the manifest a consumer no other repo could be",
       "patterns": [
         "src/**/*.test.ts",
+        "src/adapters/**",
         "src/baseline/**",
         "src/cli/**",
         "src/contracts/**",
@@ -832,6 +919,7 @@
       ],
       "forbid": "import-path-matching",
       "forbiddenLayers": [
+        "adapter",
         "baseline",
         "cli",
         "contract",
@@ -854,6 +942,7 @@
       "patterns": [
         "architecture.config.ts",
         "src/**/*.test.ts",
+        "src/adapters/**",
         "src/archcheck.ts",
         "src/baseline/**",
         "src/cli/**",
