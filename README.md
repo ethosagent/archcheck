@@ -311,6 +311,11 @@ commit. It is never silently legal.
 
 One `layers` rule carries `catchesUnlayered: true`. That rule reports a file in no layer.
 
+`archcheck init` also generates two edge bans: production code imports neither a test file nor a
+testing library. They carry `edges: 'production'`, which skips every edge that **starts** in a test
+file — so a test may reach for another test and for `vitest` freely, and only production code is
+held to the ban. Without that filter the rule would be banning the tests, not the reach into them.
+
 ### The dependency audit
 
 A layer says which packages it may import:
