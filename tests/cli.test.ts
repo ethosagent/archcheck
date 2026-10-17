@@ -18,7 +18,9 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { implementedKinds } from '../src/contracts/index.js';
+import { renderManifest } from '../src/init/index.js';
 import { CONTRACT_KINDS } from '../src/types.js';
+import { DEFAULT_TEST_GLOBS } from '../src/util/testEdges.js';
 import { childEnv } from './childEnv.js';
 
 const ROOT = join(import.meta.dir, '..');
@@ -275,6 +277,41 @@ describe('coveredBy, end to end', () => {
       expect(stdout).not.toContain('is covered by');
       expect(code).toBe(0);
     });
+  });
+});
+
+describe('production code reaches for no test', () => {
+  /**
+   * #6's second criterion, which #31 could not deliver: it needed a rule form that bans an edge TO
+   * a test file or to a package, and `forbidden` did not exist yet.
+   *
+   * The control is the whole point. `src/domain/price.test.ts` imports the same test helper and the
+   * same testing library as `src/domain/price.ts`. Both are legitimate there, and `edges:
+   * 'production'` is what tells the two apart — so a rule that fired on both would be banning the
+   * tests, not the production code reaching into them.
+   */
+  test('a production file importing a test file or a testing library fails', () => {
+    const { code, stdout } = archcheck(['--cwd', fixture('test-imports')]);
+    expect(code).toBe(1);
+    expect(stdout).toContain('src/domain/price.ts may not import ./fakes.test.js');
+    expect(stdout).toContain('src/domain/price.ts may not import vitest');
+    expect(stdout).toContain('2 deterministic');
+  });
+
+  test('the test file doing exactly the same two things is silent', () => {
+    const { stdout } = archcheck(['--cwd', fixture('test-imports')]);
+    expect(stdout).not.toContain('src/domain/price.test.ts');
+  });
+
+  test('archcheck init ships both bans, so a new repository gets them', () => {
+    // A default nobody generates is a default nobody has. These two are the only generated rules
+    // that need the `tests` globs, so they are the ones most likely to be dropped by accident.
+    const generated = renderManifest([{ name: 'domain', match: 'src/**' }], new Map());
+    expect(generated).toContain("id: 'production-code-does-not-import-a-test-file'");
+    expect(generated).toContain("id: 'production-code-does-not-import-a-testing-library'");
+    expect(generated).toContain("edges: 'production'");
+    // Rendered from DEFAULT_TEST_GLOBS, so the ban and the `tests` default cannot drift apart.
+    for (const glob of DEFAULT_TEST_GLOBS) expect(generated).toContain(glob);
   });
 });
 
