@@ -18,10 +18,12 @@
  * the graph reader, so a second parse would be waste. `remedy.autofix` stays false.
  */
 import ts from 'typescript';
+import { resolveQualified } from '../graph/symbols.js';
 import type { Edge } from '../graph/types.js';
 import { err, ok, type Result } from '../result.js';
 import type { Fragment, RawFinding, Rule } from '../types.js';
 import { matchesAny } from '../util/glob.js';
+import { isQualified, qualifiedMatches } from '../util/qualifiedTarget.js';
 import type { ContractType, EmitCtx, ExplainCtx, Refinement, ValidateCtx } from './types.js';
 
 /** The closed set. Adding one is a deliberate change with a fixture, not a config value. */
@@ -73,14 +75,54 @@ function scanAst(
   params: BannedSyntaxParams,
   source: ts.SourceFile,
   found: BannedOccurrence[],
+  checker?: ts.TypeChecker,
 ): void {
+  const target = params.target ?? '';
+  // A qualified target is decided by what the name REFERS to, which needs a checker. A dotted
+  // target keeps the text comparison it always had, so existing manifests are unaffected — and a
+  // qualified target without a checker finds nothing rather than guessing from the text, because
+  // the whole point of writing it qualified was to stop trusting the text.
+  const bySymbol = isQualified(target) && checker !== undefined;
+  // A declaration is not a use. The import that brings `exec` in, and the binding that pulls
+  // `log` out of `console`, both REFER to the banned symbol — but `banned-syntax` is about code
+  // that uses a construct, and banning the import itself is what `forbidden` and `layers` are
+  // for. The text path never matched an import line either.
+  //
+  // The relationship is DIRECT, not ancestral: a first attempt walked the ancestors and matched
+  // `isVariableDeclaration`, which silenced every call site too, because `const one = () =>
+  // run(...)` puts the call inside a variable declaration.
+  const isDeclarationSite = (node: ts.Node): boolean => {
+    const parent = node.parent;
+    if (parent === undefined) return false;
+    if (ts.isImportSpecifier(parent)) return true;
+    if (ts.isNamespaceImport(parent) || ts.isImportClause(parent)) return true;
+    if (ts.isBindingElement(parent)) return parent.name === node || parent.propertyName === node;
+    return false;
+  };
+  const symbolHit = (node: ts.Node): string | undefined => {
+    if (!bySymbol || checker === undefined) return undefined;
+    if (isDeclarationSite(node)) return undefined;
+    const resolved = resolveQualified(node, checker);
+    if (resolved === undefined || !qualifiedMatches(target, resolved)) return undefined;
+    return resolved;
+  };
   const record = (node: ts.Node, snippet: string) => {
     found.push({ ...positionOf(source, node), snippet });
   };
 
   const visit = (node: ts.Node): void => {
     switch (params.selector) {
-      case 'member-access':
+      case 'member-access': {
+        if (bySymbol) {
+          // The outermost node of a chain again, for the same reason: `console.log.call` would
+          // otherwise be counted at two depths. An identifier whose parent is a property access
+          // is skipped, because the parent carries the whole path.
+          const skip =
+            ts.isPropertyAccessExpression(node.parent) && node.parent.expression === node;
+          const resolved = skip ? undefined : symbolHit(node);
+          if (resolved !== undefined) record(node, resolved);
+          break;
+        }
         // Only the OUTERMOST matching node of a chain: `process.env.A` contains `process.env`,
         // and both match, so without the parent check one access counted twice (0.2.0). Pinned by
         // 'one access chain is one occurrence' in banned-syntax.test.ts.
@@ -102,11 +144,19 @@ function scanAst(
           record(node, node.text);
         }
         break;
-      case 'new-expression':
-        if (ts.isNewExpression(node) && node.expression.getText(source) === params.target) {
+      }
+      case 'new-expression': {
+        if (!ts.isNewExpression(node)) break;
+        if (bySymbol) {
+          const resolved = symbolHit(node.expression);
+          if (resolved !== undefined) record(node, `new ${resolved}()`);
+          break;
+        }
+        if (node.expression.getText(source) === params.target) {
           record(node, `new ${params.target}()`);
         }
         break;
+      }
       case 'string-literal-comparison':
         if (
           ts.isBinaryExpression(node) &&
@@ -196,6 +246,7 @@ export function findBannedOccurrences(
   params: BannedSyntaxParams,
   source: ts.SourceFile | undefined,
   computedImports: readonly Edge[],
+  checker?: ts.TypeChecker,
 ): BannedOccurrence[] {
   const found: BannedOccurrence[] = [];
   if (params.selector === 'computed-dynamic-import') {
@@ -209,7 +260,7 @@ export function findBannedOccurrences(
     scanComments(source, found);
     return found;
   }
-  scanAst(params, source, found);
+  scanAst(params, source, found, checker);
   return found;
 }
 

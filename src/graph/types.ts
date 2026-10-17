@@ -53,6 +53,12 @@ export type ModuleGraph = {
    * needs a program and its `ingest()` does not.
    */
   sourceFileFor(file: string): ts.SourceFile | undefined;
+  /**
+   * The checker the reader already built. Present for the same reason `sourceFileFor` is, and
+   * absent for the same reason: a graph restored from a written report has no program behind it.
+   * A caller that needs it must say what it does without one.
+   */
+  checker?: ts.TypeChecker;
   /** How many files were walked rather than restored from cache — the cache-hit assertion. */
   readonly walkedCount: number;
 };

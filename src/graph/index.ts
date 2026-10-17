@@ -97,6 +97,7 @@ export function readGraph(options: ReadOptions): Result<ModuleGraph> {
     edges,
     factsFor: (file) => facts.get(file),
     sourceFileFor: (file) => sources.get(file),
+    checker,
     walkedCount: walked,
   });
 }

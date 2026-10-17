@@ -100,6 +100,7 @@ function evaluate(ctx: RunCtx, graph: ModuleGraph): RawFinding[] {
         params,
         graph.sourceFileFor(file),
         computedByFile.get(file) ?? [],
+        graph.checker,
       );
       for (const occurrence of occurrences) {
         findings.push({
