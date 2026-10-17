@@ -188,7 +188,6 @@ describe('the injected validator path', () => {
       files: [],
       edges: [],
       factsFor: () => undefined,
-      sourceFileFor: () => undefined,
       walkedCount: 0,
     };
     const findings = await probe.run(ctx({ graph: () => ok(empty) }));

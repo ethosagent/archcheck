@@ -34,7 +34,7 @@
       "severity": "error",
       "confidence": "deterministic",
       "mark": "✓",
-      "remedy": "return the decision as data and let a probe do the walking"
+      "remedy": "return the decision as data and let a probe do the walking — a walk belongs in src/graph/syntax.ts, and the contract reads the fact it produced"
     },
     {
       "id": "coverage-is-computed-from-rules-alone",

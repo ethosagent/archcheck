@@ -5,14 +5,17 @@
  * chain knows who the caller is; only the endpoint knows what is being asked, so the declaration
  * has to be at the call site — and a call site that forgot it is invisible to every other kind.
  *
- * This is AST work, not filesystem work. It means finding the call expression and reading its
- * arguments, which needs the program the graph reader already built.
+ * Finding the call and reading its arguments is AST work, and it happens in the graph layer: this
+ * file asks "where is `registerRoute` called, and what do its object arguments declare", and
+ * decides from the answer. Before 0.3.2 it did the walk itself, which is why the kind silently
+ * could not run against an ingested graph.
  *
  * What a caller must know: the check is that the field is PRESENT (and, optionally, one of a set
  * of allowed values). Whether the value is the right permission for that endpoint is a judgement
  * rule, not this one.
  */
-import ts from 'typescript';
+import type { SyntaxFacts } from '../graph/syntax.js';
+import { requestKey, type SyntaxRequest } from '../graph/syntaxRequest.js';
 import { err, ok, type Result } from '../result.js';
 import type { Fragment, RawFinding, Rule } from '../types.js';
 import { matchesAny } from '../util/glob.js';
@@ -46,57 +49,43 @@ export type MissingDeclaration = {
   found?: string;
 };
 
-function propertyNamed(object: ts.ObjectLiteralExpression, field: string) {
-  return object.properties.find((property) => {
-    const name = property.name;
-    if (!name) return false;
-    if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) return name.text === field;
-    return false;
-  });
+/** The question this rule asks of the graph: where is this callee called? */
+export function declaredFieldRequest(params: DeclaredFieldParams): SyntaxRequest {
+  return { construct: 'declared-field-call', target: params.on };
 }
 
-function literalValueOf(property: ts.ObjectLiteralElementLike): string | undefined {
-  if (!ts.isPropertyAssignment(property)) return undefined;
-  return ts.isStringLiteralLike(property.initializer) ? property.initializer.text : undefined;
-}
-
+/**
+ * Call sites of `params.on` that do not declare `params.field`, or declare it out of range.
+ *
+ * A non-literal value is accepted: it may be a constant, and guessing would produce a false
+ * positive on correct code — which is worse than missing one. That is why a collected field
+ * carries `value` only when the property was written as a string literal.
+ */
 export function findMissingDeclarations(
   params: DeclaredFieldParams,
-  source: ts.SourceFile | undefined,
+  facts: SyntaxFacts | undefined,
 ): MissingDeclaration[] {
-  if (source === undefined) return [];
+  const occurrences = facts?.[requestKey(declaredFieldRequest(params))] ?? [];
   const found: MissingDeclaration[] = [];
+  const call = `${params.on}(…)`;
 
-  const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node) && node.expression.getText(source) === params.on) {
-      const objects = node.arguments.filter(ts.isObjectLiteralExpression);
-      const property = objects
-        .map((object) => propertyNamed(object, params.field))
-        .find((match) => match !== undefined);
-      const { line, character } = source.getLineAndCharacterOfPosition(node.getStart(source));
-      const call = `${params.on}(…)`;
-
-      if (property === undefined) {
-        found.push({ line: line + 1, col: character + 1, call, problem: 'absent' });
-      } else if (params.allowed && params.allowed.length > 0) {
-        const value = literalValueOf(property);
-        // A non-literal value is accepted: it may be a constant, and guessing would produce a
-        // false positive on correct code — which is worse than missing one.
-        if (value !== undefined && !params.allowed.includes(value)) {
-          found.push({
-            line: line + 1,
-            col: character + 1,
-            call,
-            problem: 'not-allowed',
-            found: value,
-          });
-        }
-      }
+  for (const occurrence of occurrences) {
+    const declared = (occurrence.fields ?? []).find((field) => field.name === params.field);
+    if (declared === undefined) {
+      found.push({ line: occurrence.line, col: occurrence.col, call, problem: 'absent' });
+      continue;
     }
-    ts.forEachChild(node, visit);
-  };
+    if (params.allowed === undefined || params.allowed.length === 0) continue;
+    if (declared.value === undefined || params.allowed.includes(declared.value)) continue;
+    found.push({
+      line: occurrence.line,
+      col: occurrence.col,
+      call,
+      problem: 'not-allowed',
+      found: declared.value,
+    });
+  }
 
-  ts.forEachChild(source, visit);
   return found;
 }
 

@@ -9,10 +9,16 @@
  *
  * What a caller must know: a cached edge has no `node`. Its `line`/`col` were precomputed at walk
  * time, so position survives, but anything that needs the AST must check for `node` first.
+ *
+ * Syntax facts are cached beside the edges, which is what makes the AST rules as cheap on a warm
+ * run as the others. They are only valid for the request set that produced them, so the caller
+ * folds the request fingerprint into `fingerprint`: a changed target throws the whole file away
+ * rather than serving an answer to a question nobody asked.
  */
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { SyntaxFacts } from './syntax.js';
 import type { Edge, FileFacts } from './types.js';
 
 export const CACHE_DIR = '.archcheck/cache';
@@ -41,7 +47,12 @@ export function hashContent(content: string): string {
 }
 
 type SerialisableEdge = Omit<Edge, 'node'>;
-type CachedFacts = { edges: SerialisableEdge[]; implementsPorts: string[]; exports: string[] };
+type CachedFacts = {
+  edges: SerialisableEdge[];
+  implementsPorts: string[];
+  exports: string[];
+  syntax?: SyntaxFacts;
+};
 type CacheFile = { schemaVersion: 1; fingerprint: string; files: Record<string, CachedFacts> };
 
 export type FactsCache = {
@@ -55,6 +66,7 @@ function stripNodes(facts: FileFacts): CachedFacts {
     edges: facts.edges.map(({ node: _node, ...rest }) => rest),
     implementsPorts: facts.implementsPorts,
     exports: facts.exports,
+    ...(facts.syntax === undefined ? {} : { syntax: facts.syntax }),
   };
 }
 
@@ -88,6 +100,7 @@ export function createFactsCache(root: string, fingerprint: string): FactsCache 
         edges: entry.edges.map((edge) => ({ ...edge })),
         implementsPorts: entry.implementsPorts,
         exports: entry.exports,
+        ...(entry.syntax === undefined ? {} : { syntax: entry.syntax }),
       };
     },
     set(file, contentHash, facts) {

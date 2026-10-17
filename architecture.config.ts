@@ -125,8 +125,17 @@ export default defineArchitecture({
         name: 'contract',
         match: 'src/contracts/**',
         mayImport: ['kernel', 'util', 'graph'],
+        // The compiler API is how this layer stopped deciding and started walking. Two kinds
+        // reached for `typescript` from in here, which is why they could not run against an
+        // ingested graph and were never cached. The seam that fixed it is only kept by a gate:
+        // the graph layer collects syntax facts, and a contract reads them.
+        externals: { deny: ['typescript'] },
       },
-      remedy: { summary: 'return the decision as data and let a probe do the walking' },
+      remedy: {
+        summary:
+          'return the decision as data and let a probe do the walking — a walk belongs in ' +
+          'src/graph/syntax.ts, and the contract reads the fact it produced',
+      },
     },
     {
       ...law,

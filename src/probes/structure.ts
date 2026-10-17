@@ -70,7 +70,7 @@ function declaredFieldFindings(ctx: RunCtx, graph: ModuleGraph): RawFinding[] {
     for (const rule of rules) {
       const params = asDeclaredFieldParams(rule);
       if (!declaredFieldApplies(params, relative)) continue;
-      for (const missing of findMissingDeclarations(params, graph.sourceFileFor(file))) {
+      for (const missing of findMissingDeclarations(params, graph.factsFor(file)?.syntax)) {
         findings.push({
           ruleId: rule.id,
           file: relative,

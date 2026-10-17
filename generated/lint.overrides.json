@@ -148,7 +148,7 @@
         "report",
         "test"
       ],
-      "message": "a contract kind decides, emits and explains — it never runs anything — return the decision as data and let a probe do the walking",
+      "message": "a contract kind decides, emits and explains — it never runs anything — return the decision as data and let a probe do the walking — a walk belongs in src/graph/syntax.ts, and the contract reads the fact it produced",
       "patterns": [
         "architecture.config.ts",
         "src/**/*.test.ts",

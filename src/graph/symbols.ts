@@ -11,9 +11,9 @@
  * rule kinds: the graph observes and reports, and "this identifier refers to that export" is an
  * observation. The judgement about whether that symbol is banned stays in the contract.
  *
- * What a caller must know: it needs a real `ts.TypeChecker`, so it cannot run against a graph
- * restored from a written report. That is the same caveat `sourceFileFor` carries, for the same
- * reason, and the caller falls back to the text path rather than silently finding nothing.
+ * What a caller must know: it needs a real `ts.TypeChecker`, so it only runs while the graph is
+ * being READ. That is why its answers are stored as syntax facts: a graph restored from a written
+ * report has no checker, and the facts are how an ingested run still sees what a name refers to.
  */
 import ts from 'typescript';
 
