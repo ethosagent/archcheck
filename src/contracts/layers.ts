@@ -9,7 +9,8 @@
  *
  *   0. A is a test file and this rule only
  *      looks at production edges            → allowed (out of scope, not permitted)
- *   1. B is external                        → allowed (a separate rule governs dependencies)
+ *   1. B is external                        → the layer's `externals` policy decides, and a
+ *                                             layer without one allows it
  *   2. A and B in the same layer, and that
  *      layer denies sibling units, and they
  *      are different units                  → VIOLATION: a sibling edge
@@ -32,6 +33,7 @@ import { err, ok, type Result } from '../result.js';
 import type { EdgeFilter, Fragment, RawFinding, Rule } from '../types.js';
 import { globProblems } from '../util/glob.js';
 import { edgeInScope } from '../util/testEdges.js';
+import { type Externals, externalReason } from './externals.js';
 import { resolveSiblingEdge, type SiblingPolicy } from './siblings.js';
 import type { ContractType, EmitCtx, ExplainCtx, Refinement, ValidateCtx } from './types.js';
 
@@ -61,6 +63,12 @@ export type LayersParams = {
    * declare a test layer with `mayImport: '*'`.
    */
   edges?: EdgeFilter;
+  /**
+   * Which npm packages and Node built-ins this layer may reach. `allow` makes the layer
+   * default-deny, which is the point: a deny-list only stops what somebody already thought of,
+   * so a new dependency arrives unnoticed. A layer without `externals` keeps today's behaviour.
+   */
+  externals?: Externals;
 };
 
 export type Layer = {
@@ -72,6 +80,7 @@ export type Layer = {
   siblings: SiblingPolicy;
   unit: string | undefined;
   edges: EdgeFilter;
+  externals: Externals | undefined;
 };
 
 export type LayerTable = {
@@ -98,6 +107,7 @@ export function buildLayerTable(rules: readonly Rule[]): LayerTable {
       siblings: params.siblings ?? 'allow',
       unit: params.unit,
       edges: params.edges ?? 'all',
+      externals: params.externals,
     };
   });
   const owner =
@@ -117,6 +127,8 @@ export type EdgeVerdict =
       /** Set only by a sibling denial: the two units the edge crossed. */
       fromUnit?: string;
       toUnit?: string;
+      /** Set only by an external-package denial. */
+      externals?: 'denied' | 'unlisted';
     };
 
 /**
@@ -134,7 +146,21 @@ export function resolveEdge(
   edge: { external: boolean; typeOnly: boolean; test: boolean },
   paths: { from: string; to: string },
 ): EdgeVerdict {
-  if (edge.external) return { allowed: true };
+  if (edge.external) {
+    // A layer with no policy keeps the old behaviour, which is why every existing manifest is
+    // unaffected. `paths.to` is the specifier for an external edge, set by the probe.
+    if (fromLayer?.externals === undefined) return { allowed: true };
+    const reason = externalReason(fromLayer.externals, paths.to);
+    if (reason === undefined) return { allowed: true };
+    return {
+      allowed: false,
+      ruleId: fromLayer.ruleId,
+      fromLayer: fromLayer.name,
+      toLayer: paths.to,
+      mayImport: fromLayer.externals.allow ?? [],
+      externals: reason,
+    };
+  }
   if (fromLayer === undefined) return { allowed: true };
   // Scope, not law: a rule that only looks at production edges has nothing to say about this one.
   if (!edgeInScope(fromLayer.edges, edge.test)) return { allowed: true };
@@ -221,6 +247,28 @@ function validateParams(rule: Rule, ctx: ValidateCtx): Result<void> {
     }
   }
 
+  const externals = params.externals;
+  if (externals !== undefined) {
+    if (typeof externals !== 'object' || externals === null) {
+      errors.push('params.externals must be an object with an allow list, a deny list, or both');
+    } else {
+      const policy = externals as Record<string, unknown>;
+      if (policy.allow === undefined && policy.deny === undefined) {
+        errors.push(
+          'params.externals declares neither allow nor deny — an empty policy decides nothing, ' +
+            'and omitting the field says that more clearly',
+        );
+      }
+      for (const key of ['allow', 'deny'] as const) {
+        const value = policy[key];
+        if (value === undefined) continue;
+        if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+          errors.push(`params.externals.${key} must be a list of package patterns`);
+        }
+      }
+    }
+  }
+
   const edges = params.edges;
   if (edges !== undefined && edges !== 'all' && edges !== 'production') {
     errors.push(`params.edges must be 'all' or 'production' (got ${JSON.stringify(edges)})`);
@@ -295,6 +343,7 @@ function emitFragments(rule: Rule, ctx: EmitCtx): Fragment[] {
         catchesUnlayered: table.unlayeredOwner === rule.id,
         ...(self.unit === undefined ? {} : { siblings: self.siblings, unit: self.unit }),
         ...(self.edges === 'all' ? {} : { edges: self.edges }),
+        ...(self.externals === undefined ? {} : { externals: self.externals }),
         statement: rule.statement,
       },
     },
@@ -345,6 +394,16 @@ function explainFinding(finding: RawFinding, rule: Rule, ctx: ExplainCtx): strin
     ].join('\n');
   }
 
+  const externals = evidence.externals;
+  if (typeof externals === 'string') {
+    const verb = externals === 'denied' ? 'is denied to' : 'is not on the allow-list of';
+    return [
+      `${fromLayer} may not import ${String(evidence.to ?? '')}`,
+      `  the package ${verb} the ${fromLayer} layer`,
+      `  → ${rule.remedy.summary}`,
+    ].join('\n');
+  }
+
   const fromUnit = evidence.fromUnit;
   const toUnit = evidence.toUnit;
   if (typeof fromUnit === 'string' && typeof toUnit === 'string') {
@@ -386,6 +445,17 @@ function refineFinding(finding: RawFinding, rule: Rule, ctx: ExplainCtx): Refine
       },
     };
   }
+  if (typeof evidence.externals === 'string') {
+    const params = asLayersParams(rule);
+    return {
+      statement: `${String(evidence.fromLayer)} may not import ${String(evidence.to)}`,
+      remedy: {
+        ...rule.remedy,
+        ...(params.externals?.allow ? { allowed: params.externals.allow } : {}),
+      },
+    };
+  }
+
   if (typeof evidence.fromUnit === 'string' && typeof evidence.toUnit === 'string') {
     // Deliberately no `allowed` list. The layer's mayImport is irrelevant to a sibling edge:
     // naming it would send the reader to widen an allow-list that was never the problem.
