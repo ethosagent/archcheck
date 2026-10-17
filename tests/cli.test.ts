@@ -111,6 +111,23 @@ describe('exit code 1 — new violations of error-severity rules', () => {
   });
 });
 
+describe('sibling units inside one layer', () => {
+  /**
+   * The fixture carries three legal edges beside the one illegal one: an import inside the cart
+   * unit, and the shared layer imported from both units. A second finding would mean the rule
+   * matches more than it claims, which is the failure a fixture exists to catch.
+   */
+  test('a cross-unit import is the only finding, and it names both units', () => {
+    const { code, stdout } = archcheck(['--cwd', fixture('siblings')]);
+    expect(code).toBe(1);
+    expect(stdout).toContain('src/features/cart may not import src/features/checkout');
+    expect(stdout).toContain('src/features/cart/index.ts:1');
+    expect(stdout).toContain('1 deterministic');
+    expect(stdout).not.toContain('total.ts');
+    expect(stdout).not.toContain('money.ts');
+  });
+});
+
 describe('exit code 2 — configuration invalid', () => {
   test('an unknown layer in mayImport exits 2, naming the rule and the field', () => {
     const { code, stderr } = archcheck(['--cwd', fixture('broken-manifest')]);
