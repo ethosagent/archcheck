@@ -8,19 +8,46 @@ const ban = {
 
 export default defineArchitecture({
   rules: [
-    ...(['checkout', 'payments', 'cart', 'legacy'] as const).map((name, index) => ({
+    ...(['checkout', 'payments', 'cart', 'legacy', 'widget', 'handler'] as const).map(
+      (name, index) => ({
+        kind: 'layers' as const,
+        id: `${name}-is-declared`,
+        statement: `${name} is a declared layer`,
+        severity: 'error' as const,
+        confidence: 'deterministic' as const,
+        params: {
+          name,
+          match: `src/${name}/**`,
+          mayImport: '*' as const,
+          ...(index === 0 ? { catchesUnlayered: true } : {}),
+        },
+        remedy: { summary: 'declare the layer this path belongs to' },
+      }),
+    ),
+    // A SECOND axis. Every layer on it allows every import, so the axis contributes no layer
+    // finding of its own — the cross-dimension `forbidden` rule below is the only thing it feeds.
+    // `shared` is declared LAST and matches everything, because first match wins: it is this
+    // axis's elected owner of the unlayered report, which every axis must have.
+    ...(
+      [
+        ['client', 'src/widget/**'],
+        ['server', 'src/handler/**'],
+        ['shared', 'src/**'],
+      ] as const
+    ).map(([name, match], index) => ({
       kind: 'layers' as const,
-      id: `${name}-is-declared`,
-      statement: `${name} is a declared layer`,
+      id: `${name}-is-a-runtime`,
+      statement: `${name} is a declared runtime`,
       severity: 'error' as const,
       confidence: 'deterministic' as const,
       params: {
         name,
-        match: `src/${name}/**`,
+        dimension: 'runtime',
+        match,
         mayImport: '*' as const,
-        ...(index === 0 ? { catchesUnlayered: true } : {}),
+        ...(index === 2 ? { catchesUnlayered: true } : {}),
       },
-      remedy: { summary: 'declare the layer this path belongs to' },
+      remedy: { summary: 'say which runtime this path belongs to' },
     })),
     {
       ...ban,
@@ -35,6 +62,13 @@ export default defineArchitecture({
       statement: 'checkout may not reach the payments SDK directly',
       params: { from: { glob: 'src/checkout/**' }, to: { glob: 'src/payments/**' } },
       remedy: { summary: 'go through the payments port instead' },
+    },
+    {
+      ...ban,
+      id: 'the-client-never-calls-the-server-directly',
+      statement: 'client code does not call a server module in process',
+      params: { from: { runtime: 'client' }, to: { runtime: 'server' } },
+      remedy: { summary: 'call it over the wire, or move the logic to a shared module' },
     },
     {
       ...ban,

@@ -10,10 +10,16 @@
  * INTO a changed file is not a new violation — the importer did not change.
  */
 
+import { dependencyNamesOf, unapprovedDependencies } from '../contracts/dependencyAudit.js';
 import { DEFAULT_DIMENSION, dimensionsOf } from '../contracts/dimensions.js';
 import { asEncapsulationParams, resolveEncapsulation } from '../contracts/encapsulation.js';
 import { asForbiddenParams, forbiddenApplies } from '../contracts/forbidden.js';
-import { buildLayerTable, type Layer, resolveEdge } from '../contracts/layers.js';
+import {
+  buildLayerTable,
+  type DependencyAudit,
+  type Layer,
+  resolveEdge,
+} from '../contracts/layers.js';
 import { fileMatches } from '../graph/match.js';
 import type { SyntaxFacts } from '../graph/syntax.js';
 import type { Edge, FileFacts, ModuleGraph } from '../graph/types.js';
@@ -119,6 +125,7 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
   if (axisLayers === 0 && barrelRules.length === 0 && forbiddenRules.length === 0) {
     return [];
   }
+  const auditFindings = dependencyFindings(ctx, table.audit);
 
   // The default axis keeps the code path it had. Any further axis declared by the manifest gets
   // its own table, its own cache and its own unlayered owner, and an edge must satisfy each.
@@ -138,6 +145,33 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
   const layerFor = (file: string): Layer | undefined => {
     if (!layerCache.has(file)) layerCache.set(file, layerOf(table.layers, file, ctx.root, graph));
     return layerCache.get(file);
+  };
+
+  type Axis = (typeof extraAxes)[number];
+  const axisLayerOf = (axis: Axis, file: string): Layer | undefined => {
+    if (!axis.cache.has(file)) {
+      axis.cache.set(file, layerOf(axis.table.layers, file, ctx.root, graph));
+    }
+    return axis.cache.get(file);
+  };
+
+  /**
+   * The layer this file sits in on EVERY axis, which is what a `forbidden` side reads.
+   *
+   * A side names a dimension and a layer name, and `layer` is simply the default dimension — so a
+   * rule that reads one axis and a rule that combines two go through the same lookup. Memoised per
+   * file because each edge asks twice, once for each end.
+   */
+  const nameCache = new Map<string, Record<string, string | undefined>>();
+  const layerNamesFor = (file: string): Record<string, string | undefined> => {
+    const already = nameCache.get(file);
+    if (already !== undefined) return already;
+    const names: Record<string, string | undefined> = {
+      [DEFAULT_DIMENSION]: layerFor(file)?.name,
+    };
+    for (const axis of extraAxes) names[axis.table.dimension] = axisLayerOf(axis, file)?.name;
+    nameCache.set(file, names);
+    return names;
   };
 
   for (const edge of graph.edges) {
@@ -182,8 +216,12 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
       if (!edgeInScope(params.edges ?? 'all', fromIsTest)) continue;
       const banned = forbiddenApplies(
         params,
-        { path: fromPath, layer: from?.name, external: false },
-        { path: toPath, layer: to?.name, external: edge.external },
+        { path: fromPath, external: false, layers: layerNamesFor(edge.from) },
+        {
+          path: toPath,
+          external: edge.external,
+          layers: edge.external ? {} : layerNamesFor(edge.to),
+        },
       );
       if (!banned) continue;
       findings.push({
@@ -197,14 +235,8 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
     }
 
     for (const axis of extraAxes) {
-      const axisLayerFor = (file: string): Layer | undefined => {
-        if (!axis.cache.has(file)) {
-          axis.cache.set(file, layerOf(axis.table.layers, file, ctx.root, graph));
-        }
-        return axis.cache.get(file);
-      };
-      const axisFrom = axisLayerFor(edge.from);
-      const axisTo = edge.external ? undefined : axisLayerFor(edge.to);
+      const axisFrom = axisLayerOf(axis, edge.from);
+      const axisTo = edge.external ? undefined : axisLayerOf(axis, edge.to);
       const axisVerdict = resolveEdge(
         axis.table,
         axisFrom,
@@ -304,7 +336,48 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
     }
   }
 
-  return findings;
+  return [...findings, ...auditFindings];
+}
+
+/**
+ * Every dependency the architecture never approved, reported against `package.json`.
+ *
+ * Why it is not an edge check: `externals` answers "may THIS LAYER reach this package", which is a
+ * question about one import. This answers "is this dependency approved at all", which is a question
+ * about the repository — and a dependency nothing imports has no edge to hang a finding on. That is
+ * the case worth catching, because nobody notices the import that is missing.
+ *
+ * Unreadable or unparseable `package.json` reports nothing rather than failing the run: a
+ * repository without one is a legitimate repository, and this audit is not the gate that decides
+ * whether a manifest exists.
+ */
+function dependencyFindings(ctx: RunCtx, audit: DependencyAudit | undefined): RawFinding[] {
+  if (audit === undefined) return [];
+  // Diff scoping: the audit reads one file, so it belongs to a run that changed that file.
+  if (ctx.changed !== undefined && !ctx.changed.includes('package.json')) return [];
+
+  const source = ctx.fs.read('package.json');
+  if (source === undefined) return [];
+  let parsed: { dependencies?: unknown; devDependencies?: unknown };
+  try {
+    parsed = JSON.parse(source) as typeof parsed;
+  } catch {
+    // A malformed package.json is somebody else's error to report.
+    return [];
+  }
+
+  const declared = dependencyNamesOf(parsed, audit.includeDev);
+  const policy = { allowed: audit.allowed, unassigned: audit.unassigned };
+  return unapprovedDependencies(declared, policy).map((name) => ({
+    ruleId: audit.ruleId,
+    file: 'package.json',
+    evidence: {
+      dependency: name,
+      unapproved: true,
+      ...(audit.includeDev ? { includesDev: true } : {}),
+    },
+    identity: '',
+  }));
 }
 
 export function createGraphProbe(): Probe {

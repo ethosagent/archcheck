@@ -19,6 +19,12 @@ export {
   type MissingDeclaration,
 } from './declared-field.js';
 export {
+  type AuditPolicy,
+  dependencyNamesOf,
+  type PackageLike,
+  unapprovedDependencies,
+} from './dependencyAudit.js';
+export {
   asEncapsulationParams,
   type EncapsulationParams,
   type EncapsulationVerdict,
@@ -33,6 +39,14 @@ export {
   forbiddenApplies,
   forbiddenContract,
 } from './forbidden.js';
+export {
+  dimensionProblems,
+  dimensionsOfSide,
+  type LayerNames,
+  RESERVED_SIDE_KEYS,
+  type SideLike,
+  sideDimensionsMatch,
+} from './forbiddenDimensions.js';
 export {
   type EdgeFacts,
   type ForbiddenSide,
@@ -50,6 +64,7 @@ export {
 export {
   asLayersParams,
   buildLayerTable,
+  type DependencyAudit,
   type EdgeVerdict,
   type Layer,
   type LayersParams,

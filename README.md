@@ -190,7 +190,38 @@ discovered later:
 So the editor is quieter than the gate, never louder. **archcheck stays the gate**, and the two
 never disagree about what is allowed.
 
-Biome is not covered yet.
+#### And in Biome
+
+`archcheck/biome` turns the same sink into a Biome config fragment. Biome has no `extends` for a
+computed value, so write the fragment once and list the file in `extends`:
+
+```js
+// scripts/biome-config.mjs
+import { writeFileSync } from 'node:fs';
+import { archcheckBiomeOverrides } from 'archcheck/biome';
+
+writeFileSync('biome.generated.json', `${JSON.stringify(archcheckBiomeOverrides(), null, 2)}\n`);
+```
+
+```json
+{
+  "extends": ["./biome.generated.json"]
+}
+```
+
+**Biome shows less than ESLint does**, and the gap is worth knowing before you rely on it:
+
+| | |
+|---|---|
+| **An import ban** | shown, as `style/noRestrictedImports`, carrying your sentence. It matches the specifier as written, so the relative-import limit above applies here too |
+| **A ban on a whole global** | shown, as `style/noRestrictedGlobals`. Biome writes its own headline and attaches your sentence as the note |
+| **A ban on one member of a global** | **not shown.** `console.log` would need `noJsRestrictedProperties`, which is in Biome's nursery. The generated file is committed, so an unstable rule in it could break your lint config on a Biome upgrade |
+| **An empty catch** | **not shown**, although ESLint shows it. Biome's `noEmptyBlockStatements` has no catch scope, so it would flag every empty block — louder than the gate, which is the one thing an adapter must never be |
+| **Everything else** | **not shown.** Biome has no filename rule, nothing that reads comment text, and nothing like `no-restricted-syntax` |
+
+Each generated file names what each tool could not express, under
+`$generated.notExpressedByEslint` and `$generated.notExpressedByBiome`. The two lists differ, so
+they are reported separately rather than merged.
 
 ### Step 5 — add two scripts and one CI step
 
@@ -279,6 +310,50 @@ A `layers` rule denies what it does not allow. A new folder that nobody declares
 commit. It is never silently legal.
 
 One `layers` rule carries `catchesUnlayered: true`. That rule reports a file in no layer.
+
+### The dependency audit
+
+A layer says which packages it may import:
+
+```ts
+params: { name: 'domain', match: 'src/domain/**', mayImport: [], externals: { allow: ['zod'] } }
+```
+
+That answers a question about one import. It does not answer a question about the repository: is
+this dependency approved by the architecture **at all**? A package can sit in `package.json` and be
+imported by nothing, and nobody notices the import that is missing.
+
+One `layers` rule may own that audit:
+
+```ts
+params: {
+  name: 'domain',
+  match: 'src/domain/**',
+  mayImport: [],
+  externals: { allow: ['zod'] },
+  auditsDependencies: true,
+  unassigned: ['bun-types'],
+  // auditsDevDependencies: true,
+}
+```
+
+Each package in `package.json` that no layer allows is then reported against `package.json`:
+
+```
+left-pad is a dependency no layer may import      the-domain-decides
+  package.json
+  allowed: zod
+  → put the dependency in a layer that is allowed to import it
+```
+
+Four things are worth knowing before you turn it on:
+
+| | |
+|---|---|
+| **`unassigned` is the escape hatch** | A package the architecture knowingly does not place — a type-only dependency the compiler reads, for example. Named in the manifest, beside the rule, where a reader finds it |
+| **`devDependencies` are ignored by default** | A dev tool is not part of the architecture. `auditsDevDependencies: true` includes them |
+| **The audit is opt-in twice over** | It needs the flag **and** at least one layer with an `externals.allow` list. With the flag alone, nothing is approved by anybody, so every dependency would be a finding — noise, not a result |
+| **One rule owns it** | Two rules claiming the audit is a configuration error. Two owners would report each dependency twice, under two rule ids, and a reader would have to work out which to fix |
 
 ### Three tiers, so archcheck does not pretend
 

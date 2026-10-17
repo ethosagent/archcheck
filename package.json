@@ -9,6 +9,7 @@
   },
   "exports": {
     ".": "./dist/index.js",
+    "./biome": "./dist/adapters/biome.js",
     "./eslint": "./dist/adapters/eslint.js"
   },
   "main": "./dist/index.js",

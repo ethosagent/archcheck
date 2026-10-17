@@ -8,6 +8,7 @@
  * prevent.
  */
 
+import { toBiomeConfig } from '../adapters/biomeConfig.js';
 import { type SinkEntry, toEslintConfig } from '../adapters/eslintConfig.js';
 import type { Fragment, FragmentTarget } from '../types.js';
 import { commentHeader, generatedMeta } from './header.js';
@@ -47,16 +48,22 @@ function jsonSink(target: FragmentTarget, fragments: Fragment[], source: string)
     .map((fragment) => ({ ruleId: fragment.ruleId, ...(fragment.content as object) }))
     .sort((a, b) => a.ruleId.localeCompare(b.ruleId));
 
-  // What the editor adapter could NOT turn into a rule. A reader who sees a rule in this file
-  // would otherwise assume their editor shows it, and for two kinds it cannot: core ESLint has no
-  // filename rule and none that reads comment text. Naming them is why archcheck stays the gate.
-  const unexpressed =
-    target === 'lint' ? toEslintConfig(rules as unknown as SinkEntry[]).unexpressed : [];
+  // What each editor adapter could NOT turn into a rule. A reader who sees a rule in this file
+  // would otherwise assume their editor shows it, and for several kinds it cannot: core ESLint has
+  // no filename rule and none that reads comment text. Naming them is why archcheck stays the gate.
+  //
+  // The two lists differ, and they have to be reported separately rather than merged. Biome cannot
+  // say `empty-catch` without saying more than the rule does, so a merged list would understate
+  // what ESLint covers and overstate what Biome does.
+  const entries = rules as unknown as SinkEntry[];
+  const byEslint = target === 'lint' ? toEslintConfig(entries).unexpressed : [];
+  const byBiome = target === 'lint' ? toBiomeConfig(entries).unexpressed : [];
 
   const body = {
     $generated: {
       ...generatedMeta(source, ruleIds),
-      ...(unexpressed.length === 0 ? {} : { notExpressedByEslint: unexpressed }),
+      ...(byEslint.length === 0 ? {} : { notExpressedByEslint: byEslint }),
+      ...(byBiome.length === 0 ? {} : { notExpressedByBiome: byBiome }),
     },
     rules,
   };
