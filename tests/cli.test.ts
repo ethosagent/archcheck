@@ -17,6 +17,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { implementedKinds } from '../src/contracts/index.js';
+import { CONTRACT_KINDS } from '../src/types.js';
 import { childEnv } from './childEnv.js';
 
 const ROOT = join(import.meta.dir, '..');
@@ -125,6 +127,25 @@ describe('sibling units inside one layer', () => {
     expect(stdout).toContain('1 deterministic');
     expect(stdout).not.toContain('total.ts');
     expect(stdout).not.toContain('money.ts');
+  });
+});
+
+describe('the forbidden kind', () => {
+  /**
+   * Four bans, one fixture: layer to layer, glob to glob, an external package, and an `except`
+   * carve-out that must stay silent. The carve-out is the one worth a test of its own — a rule
+   * that bans more than it says is as broken as one that bans nothing.
+   */
+  test('bans a layer edge, a path edge and a package, and honours except', () => {
+    const { code, stdout } = archcheck(['--cwd', fixture('forbidden')]);
+    expect(code).toBe(1);
+    expect(stdout).toContain('4 deterministic');
+    expect(stdout).toContain('src/cart/direct.ts may not import ../payments/sdk.js');
+    expect(stdout).toContain('src/checkout/index.ts may not import ../payments/sdk.js');
+    expect(stdout).toContain('src/checkout/report.ts may not import lodash/fp.js');
+    expect(stdout).toContain('src/cart/reach.ts may not import ../checkout/index.js');
+    // src/legacy/allowed.ts imports the checkout too, and is excepted.
+    expect(stdout).not.toContain('src/legacy/allowed.ts');
   });
 });
 
@@ -265,39 +286,27 @@ describe('a corrupt id ledger', () => {
   });
 });
 
-describe('a rule kind nothing implements', () => {
+describe('every kind in the closed set is implemented', () => {
   /**
-   * `forbidden` is a member of the closed set of eight with no contract type, so it emits no
-   * fragment. `emit` is its own command — a CI lane that runs only `archcheck emit` sees neither
-   * `RunResult.skipped` nor `Coverage.unchecked` — so the plan's `unimplemented` has to be said
-   * out loud here or not at all.
+   * This test used to assert the opposite, with `forbidden` as its example: a kind in the closed
+   * set with no contract type, which `emit` had to name out loud because a CI lane running only
+   * `archcheck emit` sees neither `RunResult.skipped` nor `Coverage.unchecked`.
+   *
+   * `forbidden` shipped, and with it the set is complete, so that test had no subject left and no
+   * kind to substitute. Asserting the invariant instead is the stronger guard: it is the thing
+   * that fails the day somebody adds a ninth kind to `CONTRACT_KINDS` and does not implement it.
+   * The naming mechanism in `emit` stays, dormant by construction, waiting for that kind.
    */
-  const FORBIDDEN_RULE = `    {
-      id: 'one-specific-edge',
-      kind: 'forbidden' as const,
-      statement: 'this one edge is banned',
-      severity: 'error' as const,
-      confidence: 'deterministic' as const,
-      params: { from: 'src/a/**', to: 'src/b/**' },
-      remedy: { summary: 'do not import it' },
-    },
-  ],
-});`;
+  test('so no manifest can declare a kind that nothing checks', () => {
+    const implemented = new Set(implementedKinds());
+    const unimplemented = CONTRACT_KINDS.filter((kind) => !implemented.has(kind));
+    expect(unimplemented).toEqual([]);
+  });
 
-  test('is named by `emit` and by `emit --check`, which generate nothing for it', () => {
-    inCopyOf('clean', (root) => {
-      const config = join(root, 'architecture.config.ts');
-      writeFileSync(config, readFileSync(config, 'utf8').replace('  ],\n});', FORBIDDEN_RULE));
-
-      const emitted = archcheck(['emit', '--cwd', root]);
-      expect(emitted.code).toBe(0);
-      expect(emitted.stderr).toContain("'forbidden'");
-      expect(emitted.stderr).toContain('no configuration');
-
-      const checked = archcheck(['emit', '--check', '--cwd', root]);
-      expect(checked.code).toBe(0);
-      expect(checked.stderr).toContain("'forbidden'");
-    });
+  test('and a clean repository reports nothing unchecked', () => {
+    const { code, stdout } = archcheck(['--cwd', fixture('clean')]);
+    expect(code).toBe(0);
+    expect(stdout).not.toContain('unchecked');
   });
 });
 

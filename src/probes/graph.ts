@@ -10,12 +10,13 @@
  * INTO a changed file is not a new violation — the importer did not change.
  */
 import { asEncapsulationParams, resolveEncapsulation } from '../contracts/encapsulation.js';
+import { asForbiddenParams, forbiddenApplies } from '../contracts/forbidden.js';
 import { buildLayerTable, type Layer, resolveEdge } from '../contracts/layers.js';
 import { fileMatches } from '../graph/match.js';
 import type { Edge, FileFacts, ModuleGraph } from '../graph/types.js';
 import type { RawFinding } from '../types.js';
 import { repoRelative } from '../util/paths.js';
-import { isTestFile } from '../util/testEdges.js';
+import { edgeInScope, isTestFile } from '../util/testEdges.js';
 import type { Probe, RunCtx, Skip } from './types.js';
 
 export const GRAPH_REPORT_PATH = '.archcheck/graph.json';
@@ -102,7 +103,12 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
   const barrelRules = ctx.rules.filter(
     (rule) => rule.kind === 'encapsulation' && rule.severity !== 'off',
   );
-  if (table.layers.length === 0 && barrelRules.length === 0) return [];
+  const forbiddenRules = ctx.rules.filter(
+    (rule) => rule.kind === 'forbidden' && rule.severity !== 'off',
+  );
+  if (table.layers.length === 0 && barrelRules.length === 0 && forbiddenRules.length === 0) {
+    return [];
+  }
 
   const changed = ctx.changed === undefined ? undefined : new Set(ctx.changed);
   const inScope = (file: string) =>
@@ -150,6 +156,27 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
     // Computed here rather than stored on the cached edge: the globs are manifest configuration,
     // and a manifest-derived flag written into a fact cache goes stale with nothing to notice.
     const fromIsTest = isTestFile(ctx.tests, fromPath);
+    // One specific banned edge, independent of the layer law: a `forbidden` rule can ban an edge
+    // inside one layer, or an external package, neither of which an allow-list can express.
+    for (const rule of forbiddenRules) {
+      const params = asForbiddenParams(rule);
+      if (!edgeInScope(params.edges ?? 'all', fromIsTest)) continue;
+      const banned = forbiddenApplies(
+        params,
+        { path: fromPath, layer: from?.name, external: false },
+        { path: toPath, layer: to?.name, external: edge.external },
+      );
+      if (!banned) continue;
+      findings.push({
+        ruleId: rule.id,
+        file: fromPath,
+        line: edge.line,
+        col: edge.col,
+        evidence: { from: fromPath, to: toPath, specifier: edge.specifier, test: fromIsTest },
+        identity: '',
+      });
+    }
+
     const verdict = resolveEdge(
       table,
       from,
@@ -208,7 +235,7 @@ export function createGraphProbe(): Probe {
     // `layers` and `encapsulation` and nothing else, and a probe that claims a kind it ignores
     // turns a declared rule into a silent pass: the run reports no skip, says "nothing to fix",
     // and counts the rule as checked. `handles` is a promise, so it has to be true.
-    handles: ['layers', 'encapsulation'],
+    handles: ['layers', 'forbidden', 'encapsulation'],
 
     async run(ctx: RunCtx): Promise<RawFinding[] | Skip> {
       const graph = ctx.graph();

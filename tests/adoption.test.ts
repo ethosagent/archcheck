@@ -263,29 +263,35 @@ export const alsoBad = appendEntry;
 
   test('a skipped probe suppresses staleness only for the rules it would have judged', () => {
     inCopyOf('layered', (root) => {
-      // A `forbidden` rule: no probe in this version handles that kind, so every run is degraded.
-      // It says nothing whatsoever about the deterministic `layers` rules, which the graph probe
-      // did evaluate — so a layers entry that really was fixed must still reach exit 4.
+      // A `judgement` rule: its probe skips when no model is configured, so every run is
+      // degraded. It says nothing whatsoever about the deterministic `layers` rules, which the
+      // graph probe did evaluate — so a layers entry that really was fixed must still reach exit 4.
+      // This used to use a `forbidden` rule, which stopped being a skipping kind when #1 shipped.
       const config = join(root, 'architecture.config.ts');
       writeFileSync(
         config,
         readFileSync(config, 'utf8').replace(
           '  ],\n});',
           `    {
-      id: 'no-cross-module-import',
-      kind: 'forbidden' as const,
-      statement: 'one module does not reach into another',
-      severity: 'error' as const,
-      confidence: 'deterministic' as const,
-      params: { from: 'modules/ledger/**', to: 'modules/other/**' },
-      remedy: { summary: 'go through the barrel' },
+      id: 'a-controller-decides-nothing',
+      kind: 'judgement' as const,
+      statement: 'a controller validates and delegates',
+      severity: 'advisory' as const,
+      confidence: 'model' as const,
+      params: {
+        statement: 'A controller decides nothing.',
+        appliesTo: 'modules/**',
+        examples: { pass: ['return next(x);'], fail: ['if (amount > limit) return deny();'] },
+        cite: 'the branch that decides the outcome',
+      },
+      remedy: { summary: 'move the decision into the domain' },
     },
   ],
 });`,
         ),
       );
       archcheck(['baseline', '--write'], root);
-      expect(archcheck([], root).stdout).toContain('forbidden rules did not run');
+      expect(archcheck([], root).stdout).toContain('judgement did not run');
 
       // Remove the illegal import entirely, exactly as the exit-4 test above does.
       const path = join(root, violatingFile);
@@ -302,44 +308,16 @@ export const alsoBad = appendEntry;
     });
   });
 
-  test('an entry whose KIND no probe implements is not judged either', () => {
-    inCopyOf('layered', (root) => {
-      // The other half of the test above. That skip record names a KIND rather than a probe
-      // (`'<kind> rules'`), and an entry for such a rule can never reproduce — so judging it would
-      // exit 4 for ever, with `--prune` refusing because the run is degraded.
-      const config = join(root, 'architecture.config.ts');
-      writeFileSync(
-        config,
-        readFileSync(config, 'utf8').replace(
-          '  ],\n});',
-          `    {
-      id: 'no-cross-module-import',
-      kind: 'forbidden' as const,
-      statement: 'one module does not reach into another',
-      severity: 'error' as const,
-      confidence: 'deterministic' as const,
-      params: { from: 'modules/ledger/**', to: 'modules/other/**' },
-      remedy: { summary: 'go through the barrel' },
-    },
-  ],
-});`,
-        ),
-      );
-      archcheck(['baseline', '--write'], root);
-
-      const path = join(root, '.archcheck', 'baseline.json');
-      const baseline = JSON.parse(readFileSync(path, 'utf8'));
-      baseline.entries.push({
-        identity: 'f0f0f0f0f0f0f0f0',
-        ruleId: 'no-cross-module-import',
-        addedAt: '2026-01-01',
-        occurrences: 1,
-      });
-      writeFileSync(path, JSON.stringify(baseline, null, 2));
-
-      expect(archcheck([], root).code).toBe(0);
-    });
-  });
+  /**
+   * A test stood here: 'an entry whose KIND no probe implements is not judged either'. It fed the
+   * same `judgeable` mechanism as the test above, through its other input — the `'<kind> rules'`
+   * skip that names a kind no probe implements.
+   *
+   * That input became unreachable when `forbidden` shipped and completed the closed set of eight,
+   * and there is no kind left to substitute. The mechanism is still covered above, by a probe
+   * skip; the unreachability is guarded by 'every kind in the closed set is implemented' in
+   * tests/cli.test.ts, which fails the day a ninth kind is declared without an implementation.
+   */
 
   test('baseline --prune refuses on a degraded run rather than erasing the record', () => {
     inCopyOf('layered', (root) => {

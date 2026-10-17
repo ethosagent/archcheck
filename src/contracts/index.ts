@@ -26,6 +26,19 @@ export {
   resolveEncapsulation,
 } from './encapsulation.js';
 export {
+  asForbiddenParams,
+  type ForbiddenParams,
+  forbiddenApplies,
+  forbiddenContract,
+} from './forbidden.js';
+export {
+  type EdgeFacts,
+  type ForbiddenSide,
+  type ForbiddenTarget,
+  sideMatches,
+  targetMatches,
+} from './forbiddenMatch.js';
+export {
   asJudgementParams,
   effectiveConfidence,
   type JudgementParams,
@@ -51,6 +64,7 @@ export {
   namingApplies,
   namingContract,
 } from './naming.js';
+export { packageMatches, packageMatchesAny } from './packageMatch.js';
 export { contractFor, implementedKinds, validateParamsByKind, warningsFor } from './registry.js';
 export {
   asRequiredFileParams,

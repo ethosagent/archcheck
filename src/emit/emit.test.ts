@@ -4,9 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { contractFor } from '../contracts/registry.js';
 import { nextIdLedger } from '../registry/ids.js';
-import type { Rule } from '../types.js';
+import type { ContractKind, Rule } from '../types.js';
 import { applyEmit, checkEmit, describeUnimplemented, planEmit } from './index.js';
 import { sortDeep } from './merge.js';
+
+// Every kind in the closed set is implemented, so the stand-in for a future ninth kind is a
+// synthetic one. Borrowing a real kind made this suite depend on which kind lagged behind.
+const NINTH_KIND = 'ninth-kind' as unknown as ContractKind;
 
 function layerRule(id: string, name: string, mayImport: string[], extra = {}): Rule {
   return {
@@ -216,7 +220,7 @@ describe('an unimplemented kind', () => {
         ...RULES,
         {
           id: 'one-specific-edge',
-          kind: 'forbidden',
+          kind: NINTH_KIND,
           statement: 'this one edge is banned',
           severity: 'error',
           confidence: 'deterministic',
@@ -224,7 +228,7 @@ describe('an unimplemented kind', () => {
           remedy: { summary: 'do not import it' },
         },
       ];
-      expect(plan(root, withUnimplemented).unimplemented).toEqual(['forbidden']);
+      expect(plan(root, withUnimplemented).unimplemented).toEqual([NINTH_KIND]);
     });
   });
 });
@@ -259,7 +263,7 @@ describe('a document the manifest declares', () => {
 describe('describeUnimplemented', () => {
   const FORBIDDEN: Rule = {
     id: 'one-specific-edge',
-    kind: 'forbidden',
+    kind: NINTH_KIND,
     statement: 'this one edge is banned',
     severity: 'error',
     confidence: 'deterministic',
@@ -270,7 +274,7 @@ describe('describeUnimplemented', () => {
   test('names the kind emit generated nothing for', () => {
     const lines = describeUnimplemented([...RULES, FORBIDDEN]);
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain("'forbidden'");
+    expect(lines[0]).toContain(`'${NINTH_KIND}'`);
     expect(lines[0]).toContain('no configuration');
   });
 

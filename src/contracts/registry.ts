@@ -12,6 +12,7 @@ import type { ContractKind, Rule } from '../types.js';
 import { bannedSyntaxContract } from './banned-syntax.js';
 import { declaredFieldContract } from './declared-field.js';
 import { encapsulationContract } from './encapsulation.js';
+import { forbiddenContract } from './forbidden.js';
 import { judgementContract } from './judgement.js';
 import { layersContract } from './layers.js';
 import { namingContract } from './naming.js';
@@ -20,6 +21,7 @@ import type { ContractType, ValidateCtx } from './types.js';
 
 const IMPLEMENTED: readonly ContractType[] = [
   layersContract,
+  forbiddenContract,
   encapsulationContract,
   namingContract,
   bannedSyntaxContract,

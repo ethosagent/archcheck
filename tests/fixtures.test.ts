@@ -25,6 +25,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { CONTRACT_KINDS } from '../src/types.js';
 
 const ROOT = join(import.meta.dir, '..');
 const CLI = join(ROOT, 'src', 'cli', 'index.ts');
@@ -221,6 +222,7 @@ describe('every contract kind has a package fixture', () => {
     'required-file': 'structure',
     'declared-field': 'structure',
     judgement: 'judgement',
+    forbidden: 'forbidden',
   };
 
   test('each implemented kind maps to a fixture repository that exists', () => {
@@ -230,18 +232,11 @@ describe('every contract kind has a package fixture', () => {
     }
   });
 
-  test('the only kind without one is `forbidden`, which layers already covers', () => {
-    const KINDS = [
-      'layers',
-      'forbidden',
-      'encapsulation',
-      'naming',
-      'required-file',
-      'declared-field',
-      'banned-syntax',
-      'judgement',
-    ];
-    const uncovered = KINDS.filter((kind) => COVERED_BY[kind] === undefined);
-    expect(uncovered).toEqual(['forbidden']);
+  test('every kind in the closed set has one', () => {
+    // This used to assert that `forbidden` was the one exception. It shipped with #1, and with it
+    // the set is complete — so the assertion became the invariant, which is the stronger guard:
+    // it fails the day a ninth kind is declared without a fixture repository to prove it trips.
+    const uncovered = CONTRACT_KINDS.filter((kind) => COVERED_BY[kind] === undefined);
+    expect(uncovered).toEqual([]);
   });
 });

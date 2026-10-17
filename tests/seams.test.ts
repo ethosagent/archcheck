@@ -62,9 +62,12 @@ describe('every kind a probe claims is one it can actually evaluate', () => {
     }
   });
 
-  test('`forbidden` is the one unimplemented kind, and it is unimplemented on both sides', () => {
-    expect(contractFor('forbidden')).toBeUndefined();
-    expect(PROBES.some((probe) => probe.handles.includes('forbidden'))).toBe(false);
+  test('`forbidden` is implemented on both sides, which is what this suite exists to check', () => {
+    // This test used to assert the opposite. It was inverted when the kind shipped, deliberately:
+    // the bug in this suite's header was a probe that DECLARED `forbidden` and evaluated nothing,
+    // so both halves have to be asserted together or the same hole opens again.
+    expect(contractFor('forbidden')).toBeDefined();
+    expect(PROBES.some((probe) => probe.handles.includes('forbidden'))).toBe(true);
   });
 });
 
