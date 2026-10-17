@@ -85,6 +85,21 @@ export type LayersParams = {
    * so a new dependency arrives unnoticed. A layer without `externals` keeps today's behaviour.
    */
   externals?: Externals;
+  /**
+   * One `layers` rule may own the DEPENDENCY audit: every package in `package.json` that no
+   * layer's `externals.allow` names is reported against `package.json`.
+   *
+   * It needs an owner for the same reason `catchesUnlayered` does. The per-layer policy answers
+   * "may this layer reach this package", a question about one edge; this answers "is this
+   * dependency approved by the architecture at all", a question about the repository — and a
+   * dependency nothing imports has no edge to hang a finding on, which is exactly the case worth
+   * catching.
+   */
+  auditsDependencies?: boolean;
+  /** Packages the architecture knowingly does not place. Read by the audit alone. */
+  unassigned?: string[];
+  /** Audit `devDependencies` too. Off by default: a dev tool is not part of the architecture. */
+  auditsDevDependencies?: boolean;
 };
 
 export type Layer = {
@@ -105,6 +120,23 @@ export type LayerTable = {
   layers: readonly Layer[];
   /** The rule id that owns the unlayered report, or undefined when no layers rule is active. */
   unlayeredOwner: string | undefined;
+  /** The dependency audit this table asks for, or undefined when no rule claimed it. */
+  audit: DependencyAudit | undefined;
+};
+
+/**
+ * What the dependency audit needs, gathered from every layer rather than from one.
+ *
+ * `allowed` is the UNION of every layer's `externals.allow`, because the question is whether the
+ * architecture approves a package anywhere — not whether one layer may reach it. An empty union
+ * means no layer declared an allow list, and then the audit reports nothing: with nothing approved
+ * by anybody, every dependency would be a finding, which is noise rather than a result.
+ */
+export type DependencyAudit = {
+  ruleId: string;
+  allowed: string[];
+  unassigned: string[];
+  includeDev: boolean;
 };
 
 export function asLayersParams(rule: Rule): LayersParams {
@@ -142,7 +174,31 @@ export function buildLayerTable(
   const owner =
     active.find((rule) => asLayersParams(rule).catchesUnlayered === true)?.id ??
     (active.length === 1 ? active[0]?.id : undefined);
-  return { dimension, layers, unlayeredOwner: owner };
+
+  // Gathered across EVERY axis, not just this table's, because `package.json` belongs to the
+  // repository and not to one classification of it.
+  const auditor = rules.find(
+    (rule) =>
+      rule.kind === 'layers' &&
+      rule.severity !== 'off' &&
+      asLayersParams(rule).auditsDependencies === true,
+  );
+  const allowed = new Set<string>();
+  for (const rule of rules) {
+    if (rule.kind !== 'layers' || rule.severity === 'off') continue;
+    for (const name of asLayersParams(rule).externals?.allow ?? []) allowed.add(name);
+  }
+  const audit =
+    auditor === undefined || allowed.size === 0
+      ? undefined
+      : {
+          ruleId: auditor.id,
+          allowed: [...allowed].sort(),
+          unassigned: asLayersParams(auditor).unassigned ?? [],
+          includeDev: asLayersParams(auditor).auditsDevDependencies === true,
+        };
+
+  return { dimension, layers, unlayeredOwner: owner, audit };
 }
 
 /** Captures only read a single-glob match; validation rejects `same:` on the other forms. */
@@ -419,6 +475,47 @@ function validateParams(rule: Rule, ctx: ValidateCtx): Result<void> {
     );
   }
 
+  // The dependency audit belongs to the repository, so its owner is elected GLOBALLY — unlike
+  // the unlayered report below, which is per axis. Two owners would report every unapproved
+  // dependency twice, under two rule ids, and a reader would have to work out which to fix.
+  if (params.auditsDependencies !== undefined && typeof params.auditsDependencies !== 'boolean') {
+    errors.push('params.auditsDependencies must be true or false');
+  }
+  if (params.auditsDependencies === true) {
+    const auditors = ctx.rules.filter(
+      (other) =>
+        other.kind === 'layers' &&
+        other.severity !== 'off' &&
+        (other.params as Record<string, unknown>).auditsDependencies === true,
+    );
+    if (auditors.length > 1) {
+      errors.push(
+        `params.auditsDependencies is set on ${auditors.length} rules ` +
+          `(${auditors.map((other) => other.id).join(', ')}) — exactly one layers rule owns the ` +
+          'dependency audit',
+      );
+    }
+  }
+  if (params.unassigned !== undefined) {
+    const unassigned = params.unassigned;
+    if (!Array.isArray(unassigned) || !unassigned.every((name) => typeof name === 'string')) {
+      errors.push('params.unassigned must be a list of package names');
+    } else if (params.auditsDependencies !== true) {
+      // Read by the audit and by nothing else, so on a rule that does not own the audit it is a
+      // policy a reader would believe is in force and that nothing reads.
+      errors.push(
+        'params.unassigned is only read by the rule that sets params.auditsDependencies — ' +
+          'move it there, or set the flag on this rule',
+      );
+    }
+  }
+  if (params.auditsDevDependencies !== undefined && params.auditsDependencies !== true) {
+    errors.push(
+      'params.auditsDevDependencies is only read by the rule that sets ' +
+        'params.auditsDependencies — move it there, or set the flag on this rule',
+    );
+  }
+
   // Per AXIS, not globally. A manifest with a `layer` catch-all and a `runtime` catch-all is
   // correct, and the old global check would have called the second one a duplicate.
   const axis = dimensionOf(rule);
@@ -460,6 +557,7 @@ function emitFragments(rule: Rule, ctx: EmitCtx): Fragment[] {
         mayImport: self.mayImport,
         ignoreTypeOnly: self.ignoreTypeOnly,
         catchesUnlayered: table.unlayeredOwner === rule.id,
+        ...(table.audit?.ruleId === rule.id ? { auditsDependencies: true } : {}),
         ...(self.unit === undefined ? {} : { siblings: self.siblings, unit: self.unit }),
         ...(self.edges === 'all' ? {} : { edges: self.edges }),
         ...(self.externals === undefined ? {} : { externals: self.externals }),
@@ -500,6 +598,16 @@ function explainFinding(finding: RawFinding, rule: Rule, ctx: ExplainCtx): strin
   // From the manifest, never from evidence — see ExplainCtx.
   const params = asLayersParams(rule);
   const allowed = params.mayImport === '*' ? ['anything'] : (params.mayImport ?? []);
+
+  if (evidence.unapproved === true) {
+    const dependency = String(evidence.dependency ?? '?');
+    const approved = buildLayerTable(ctx.rules).audit?.allowed ?? [];
+    return [
+      `${dependency} is a dependency no layer is allowed to import`,
+      `  approved packages: ${approved.length > 0 ? approved.join(', ') : 'none'}`,
+      `  → ${rule.remedy.summary}`,
+    ].join('\n');
+  }
 
   if (evidence.unlayered === true) {
     const axis = typeof evidence.dimension === 'string' ? evidence.dimension : undefined;
@@ -571,6 +679,18 @@ function explainFinding(finding: RawFinding, rule: Rule, ctx: ExplainCtx): strin
  */
 function refineFinding(finding: RawFinding, rule: Rule, ctx: ExplainCtx): Refinement | undefined {
   const evidence = finding.evidence as Record<string, unknown>;
+  if (evidence.unapproved === true) {
+    const approved = buildLayerTable(ctx.rules).audit?.allowed ?? [];
+    return {
+      statement: `${String(evidence.dependency)} is a dependency no layer may import`,
+      remedy: {
+        ...rule.remedy,
+        // The approved set IS the allow-list here, so naming it sends the reader to the right
+        // place: either a layer declares the package, or the audit declares it unassigned.
+        allowed: approved,
+      },
+    };
+  }
   if (evidence.unlayered === true) {
     const axisName = typeof evidence.dimension === 'string' ? evidence.dimension : undefined;
     const declared = buildLayerTable(ctx.rules, axisName)

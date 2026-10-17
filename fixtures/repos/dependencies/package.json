@@ -1,0 +1,12 @@
+{
+  "name": "dependencies-fixture",
+  "private": true,
+  "dependencies": {
+    "zod": "^3.0.0",
+    "bun-types": "^1.0.0",
+    "left-pad": "^1.3.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0"
+  }
+}

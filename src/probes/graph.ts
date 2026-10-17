@@ -10,10 +10,16 @@
  * INTO a changed file is not a new violation — the importer did not change.
  */
 
+import { dependencyNamesOf, unapprovedDependencies } from '../contracts/dependencyAudit.js';
 import { DEFAULT_DIMENSION, dimensionsOf } from '../contracts/dimensions.js';
 import { asEncapsulationParams, resolveEncapsulation } from '../contracts/encapsulation.js';
 import { asForbiddenParams, forbiddenApplies } from '../contracts/forbidden.js';
-import { buildLayerTable, type Layer, resolveEdge } from '../contracts/layers.js';
+import {
+  buildLayerTable,
+  type DependencyAudit,
+  type Layer,
+  resolveEdge,
+} from '../contracts/layers.js';
 import { fileMatches } from '../graph/match.js';
 import type { SyntaxFacts } from '../graph/syntax.js';
 import type { Edge, FileFacts, ModuleGraph } from '../graph/types.js';
@@ -119,6 +125,7 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
   if (axisLayers === 0 && barrelRules.length === 0 && forbiddenRules.length === 0) {
     return [];
   }
+  const auditFindings = dependencyFindings(ctx, table.audit);
 
   // The default axis keeps the code path it had. Any further axis declared by the manifest gets
   // its own table, its own cache and its own unlayered owner, and an edge must satisfy each.
@@ -329,7 +336,48 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
     }
   }
 
-  return findings;
+  return [...findings, ...auditFindings];
+}
+
+/**
+ * Every dependency the architecture never approved, reported against `package.json`.
+ *
+ * Why it is not an edge check: `externals` answers "may THIS LAYER reach this package", which is a
+ * question about one import. This answers "is this dependency approved at all", which is a question
+ * about the repository — and a dependency nothing imports has no edge to hang a finding on. That is
+ * the case worth catching, because nobody notices the import that is missing.
+ *
+ * Unreadable or unparseable `package.json` reports nothing rather than failing the run: a
+ * repository without one is a legitimate repository, and this audit is not the gate that decides
+ * whether a manifest exists.
+ */
+function dependencyFindings(ctx: RunCtx, audit: DependencyAudit | undefined): RawFinding[] {
+  if (audit === undefined) return [];
+  // Diff scoping: the audit reads one file, so it belongs to a run that changed that file.
+  if (ctx.changed !== undefined && !ctx.changed.includes('package.json')) return [];
+
+  const source = ctx.fs.read('package.json');
+  if (source === undefined) return [];
+  let parsed: { dependencies?: unknown; devDependencies?: unknown };
+  try {
+    parsed = JSON.parse(source) as typeof parsed;
+  } catch {
+    // A malformed package.json is somebody else's error to report.
+    return [];
+  }
+
+  const declared = dependencyNamesOf(parsed, audit.includeDev);
+  const policy = { allowed: audit.allowed, unassigned: audit.unassigned };
+  return unapprovedDependencies(declared, policy).map((name) => ({
+    ruleId: audit.ruleId,
+    file: 'package.json',
+    evidence: {
+      dependency: name,
+      unapproved: true,
+      ...(audit.includeDev ? { includesDev: true } : {}),
+    },
+    identity: '',
+  }));
 }
 
 export function createGraphProbe(): Probe {

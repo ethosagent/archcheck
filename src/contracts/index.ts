@@ -19,6 +19,12 @@ export {
   type MissingDeclaration,
 } from './declared-field.js';
 export {
+  type AuditPolicy,
+  dependencyNamesOf,
+  type PackageLike,
+  unapprovedDependencies,
+} from './dependencyAudit.js';
+export {
   asEncapsulationParams,
   type EncapsulationParams,
   type EncapsulationVerdict,
@@ -58,6 +64,7 @@ export {
 export {
   asLayersParams,
   buildLayerTable,
+  type DependencyAudit,
   type EdgeVerdict,
   type Layer,
   type LayersParams,
