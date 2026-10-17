@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { syntaxRequestsOf } from '../contracts/syntaxRequests.js';
 import { createMemoryFileSystem, createNodeFileSystem, type FileSystem } from '../fs/index.js';
 import { readGraph } from '../graph/index.js';
+import { requestsFingerprint } from '../graph/syntaxRequest.js';
 import type { ModuleGraph } from '../graph/types.js';
 import { ok, type Result } from '../result.js';
 import type { Rule } from '../types.js';
@@ -37,21 +39,28 @@ const PERMISSION_RULE: Rule = {
   remedy: { summary: 'add permission: to the route spec' },
 };
 
-let built: Result<ModuleGraph> | undefined;
-const sharedGraph = (): Result<ModuleGraph> => {
-  built ??= readGraph({ root: ROOT, tsconfigPath: TSCONFIG, cache: false });
-  return built;
+/** One graph per set of syntax questions, the way the facade builds it. See lint.test.ts. */
+const built = new Map<string, Result<ModuleGraph>>();
+const graphFor = (rules: readonly Rule[]) => (): Result<ModuleGraph> => {
+  const syntax = syntaxRequestsOf(rules);
+  const key = requestsFingerprint(syntax);
+  const already = built.get(key);
+  if (already !== undefined) return already;
+  const fresh = readGraph({ root: ROOT, tsconfigPath: TSCONFIG, cache: false, syntax });
+  built.set(key, fresh);
+  return fresh;
 };
 
 function ctx(overrides: Partial<RunCtx> = {}): RunCtx {
+  const rules = overrides.rules ?? [TWIN_RULE, PERMISSION_RULE];
   return {
     root: ROOT,
     tsconfigPath: TSCONFIG,
-    rules: [TWIN_RULE, PERMISSION_RULE],
+    rules,
     fs: createNodeFileSystem(ROOT),
     configPath: 'architecture.config.ts',
     tests: DEFAULT_TEST_GLOBS,
-    graph: sharedGraph,
+    graph: graphFor(rules),
     ...overrides,
   };
 }
@@ -205,7 +214,6 @@ describe('node and memory produce identical findings', () => {
       files: [],
       edges: [],
       factsFor: () => undefined,
-      sourceFileFor: () => undefined,
       walkedCount: 0,
     };
 

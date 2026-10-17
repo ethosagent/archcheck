@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "ids": [
+    "an-adapter-translates-and-decides-nothing",
     "cli-owns-no-behaviour",
     "contracts-know-no-probe",
     "coverage-is-computed-from-rules-alone",

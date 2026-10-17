@@ -12,13 +12,19 @@ import { err, ok, type Result } from '../result.js';
 import { createFactsCache, createNullCache, type FactsCache, hashContent } from './cache.js';
 import { extractFacts, type ResolveSpecifier } from './edges.js';
 import { buildProgram } from './program.js';
-import type { Edge, FileFacts, ModuleGraph } from './types.js';
+import { requestsFingerprint, type SyntaxRequest } from './syntaxRequest.js';
+import type { Edge, FileFacts, Frontend, ModuleGraph } from './types.js';
 
 export type ReadOptions = {
   root: string;
   tsconfigPath: string;
   /** Off for tests that must observe every walk. */
   cache?: boolean;
+  /**
+   * The syntax questions the manifest's AST rules ask of each file. Empty means "ask nothing",
+   * which is what every caller that only needs edges and exports passes.
+   */
+  syntax?: readonly SyntaxRequest[];
 };
 
 function makeResolver(options: ts.CompilerOptions): ResolveSpecifier {
@@ -47,14 +53,16 @@ export function readGraph(options: ReadOptions): Result<ModuleGraph> {
   if (!built.ok) return built;
   const { program, checker, optionsFingerprint } = built.value;
 
+  const syntax = options.syntax ?? [];
+  // The request set is part of the cache key, not beside it: facts collected for one set of
+  // questions are not an answer to another, and a stale answer here reads as a clean file.
+  const fingerprint = `${optionsFingerprint}\u0000${requestsFingerprint(syntax)}`;
+
   const cache: FactsCache =
-    options.cache === false
-      ? createNullCache()
-      : createFactsCache(options.root, optionsFingerprint);
+    options.cache === false ? createNullCache() : createFactsCache(options.root, fingerprint);
 
   const resolve = makeResolver(built.value.options);
   const facts = new Map<string, FileFacts>();
-  const sources = new Map<string, ts.SourceFile>();
   const edges: Edge[] = [];
   const files: string[] = [];
   let walked = 0;
@@ -63,7 +71,6 @@ export function readGraph(options: ReadOptions): Result<ModuleGraph> {
     if (source.isDeclarationFile) continue;
     if (source.fileName.includes('/node_modules/')) continue;
     files.push(source.fileName);
-    sources.set(source.fileName, source);
 
     let contentHash: string;
     try {
@@ -79,7 +86,7 @@ export function readGraph(options: ReadOptions): Result<ModuleGraph> {
       continue;
     }
 
-    const fresh = extractFacts(source, checker, resolve);
+    const fresh = extractFacts(source, checker, resolve, syntax);
     walked += 1;
     cache.set(source.fileName, contentHash, fresh);
     facts.set(source.fileName, fresh);
@@ -96,10 +103,13 @@ export function readGraph(options: ReadOptions): Result<ModuleGraph> {
     files,
     edges,
     factsFor: (file) => facts.get(file),
-    sourceFileFor: (file) => sources.get(file),
-    checker,
     walkedCount: walked,
   });
+}
+
+/** The TypeScript reader, behind the seam. The one `Frontend` there is. */
+export function typescriptFrontend(options: ReadOptions): Frontend {
+  return { read: () => readGraph(options) };
 }
 
 export {
@@ -118,4 +128,12 @@ export {
   type LayerMatch,
 } from './match.js';
 export { type BuiltProgram, buildProgram } from './program.js';
-export type { DynamicKind, Edge, FileFacts, ModuleGraph } from './types.js';
+export { collectSyntax, type SyntaxFacts, type SyntaxOccurrence } from './syntax.js';
+export {
+  dedupeRequests,
+  requestKey,
+  requestsFingerprint,
+  type SyntaxConstruct,
+  type SyntaxRequest,
+} from './syntaxRequest.js';
+export type { DynamicKind, Edge, FileFacts, Frontend, ModuleGraph } from './types.js';

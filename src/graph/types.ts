@@ -6,6 +6,8 @@
  * evidence makes the hash differ per checkout, which would make the baseline per-machine noise.
  */
 import type ts from 'typescript';
+import type { Result } from '../result.js';
+import type { SyntaxFacts } from './syntax.js';
 
 /**
  * `computed` is the reason we own the graph. A dynamic import with a non-literal specifier
@@ -40,6 +42,12 @@ export type FileFacts = {
   implementsPorts: string[];
   /** Exported symbol names, for the `naming` kind. */
   exports: string[];
+  /**
+   * What the syntax requests derived from the manifest found in this file. Absent when the run
+   * asked nothing — which is not the same as "asked and found nothing", so a reader that needs
+   * the difference checks for the KEY, not for the field.
+   */
+  syntax?: SyntaxFacts;
 };
 
 export type ModuleGraph = {
@@ -47,18 +55,18 @@ export type ModuleGraph = {
   files: readonly string[];
   edges: readonly Edge[];
   factsFor(file: string): FileFacts | undefined;
-  /**
-   * The SourceFile the reader already parsed. Present when the graph came from a real Program,
-   * absent when it was restored from a written report — which is why the lint probe's `run()`
-   * needs a program and its `ingest()` does not.
-   */
-  sourceFileFor(file: string): ts.SourceFile | undefined;
-  /**
-   * The checker the reader already built. Present for the same reason `sourceFileFor` is, and
-   * absent for the same reason: a graph restored from a written report has no program behind it.
-   * A caller that needs it must say what it does without one.
-   */
-  checker?: ts.TypeChecker;
   /** How many files were walked rather than restored from cache — the cache-hit assertion. */
   readonly walkedCount: number;
+};
+
+/**
+ * Where a graph comes from.
+ *
+ * There is one implementation today, the TypeScript reader, and the seam exists anyway: it is what
+ * keeps every `typescript` import on one side of the line, so the rule that forbids the compiler
+ * API in `src/contracts/**` has somewhere to send the work instead. A second frontend — another
+ * language, or a graph handed over by a build tool — implements this and nothing else changes.
+ */
+export type Frontend = {
+  read(): Result<ModuleGraph>;
 };
