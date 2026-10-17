@@ -132,20 +132,97 @@ describe('sibling units inside one layer', () => {
 
 describe('the forbidden kind', () => {
   /**
-   * Four bans, one fixture: layer to layer, glob to glob, an external package, and an `except`
-   * carve-out that must stay silent. The carve-out is the one worth a test of its own — a rule
-   * that bans more than it says is as broken as one that bans nothing.
+   * Five bans, one fixture: layer to layer, glob to glob, an external package, a cross-DIMENSION
+   * ban, and an `except` carve-out that must stay silent. The carve-out is the one worth a test of
+   * its own — a rule that bans more than it says is as broken as one that bans nothing.
    */
-  test('bans a layer edge, a path edge and a package, and honours except', () => {
+  test('bans a layer edge, a path edge, a package and a runtime edge, and honours except', () => {
     const { code, stdout } = archcheck(['--cwd', fixture('forbidden')]);
     expect(code).toBe(1);
-    expect(stdout).toContain('4 deterministic');
+    expect(stdout).toContain('5 deterministic');
     expect(stdout).toContain('src/cart/direct.ts may not import ../payments/sdk.js');
     expect(stdout).toContain('src/checkout/index.ts may not import ../payments/sdk.js');
     expect(stdout).toContain('src/checkout/report.ts may not import lodash/fp.js');
     expect(stdout).toContain('src/cart/reach.ts may not import ../checkout/index.js');
+    // The second axis: client code may not call a server module in process.
+    expect(stdout).toContain('src/widget/view.ts may not import ../handler/api.js');
     // src/legacy/allowed.ts imports the checkout too, and is excepted.
     expect(stdout).not.toContain('src/legacy/allowed.ts');
+    // server to server is the same runtime, so the ban is silent there — a cross-dimension rule
+    // that fires on both directions would be banning the axis, not the edge across it.
+    expect(stdout).not.toContain('src/handler/inner.ts');
+  });
+});
+
+describe('the dependency audit', () => {
+  /**
+   * The fourth criterion of the externals work (#2), split out as #39. `externals` answers "may
+   * this layer reach this package", a question about one import. This answers "is this dependency
+   * approved at all", a question about the repository — and a dependency nothing imports has no
+   * edge to hang a finding on, which is the case worth catching.
+   */
+  test('a dependency no layer allows is reported against package.json', () => {
+    const { code, stdout } = archcheck(['--cwd', fixture('dependencies')]);
+    expect(code).toBe(1);
+    expect(stdout).toContain('left-pad is a dependency no layer may import');
+    expect(stdout).toContain('package.json');
+    // The approved set is named, so a reader knows where to put the dependency.
+    expect(stdout).toContain('allowed: zod');
+    // `zod` is on a layer's allow-list and `bun-types` is declared unassigned. Both silent.
+    expect(stdout).not.toContain('zod is a dependency');
+    expect(stdout).not.toContain('bun-types');
+  });
+
+  test('devDependencies are audited only when the rule asks for them', () => {
+    // vitest is a devDependency no layer allows. Silent by default — a dev tool is not part of
+    // the architecture — and reported once the rule says to look.
+    expect(archcheck(['--cwd', fixture('dependencies')]).stdout).not.toContain('vitest');
+
+    inCopyOf('dependencies', (root) => {
+      const manifest = join(root, 'architecture.config.ts');
+      const source = readFileSync(manifest, 'utf8');
+      writeFileSync(
+        manifest,
+        source.replace(
+          'auditsDependencies: true,',
+          'auditsDependencies: true,\n        auditsDevDependencies: true,',
+        ),
+      );
+      const { stdout } = archcheck(['--cwd', root]);
+      expect(stdout).toContain('vitest is a dependency no layer may import');
+      expect(stdout).toContain('left-pad is a dependency no layer may import');
+    });
+  });
+
+  test('a manifest with no externals audits nothing, so the check is opt-in twice over', () => {
+    // Two opt-ins, and the second is not pedantry. With the flag alone and no allow-list, NOTHING
+    // is approved by anybody, so every dependency would be a finding — noise, not a result.
+    inCopyOf('dependencies', (root) => {
+      const manifest = join(root, 'architecture.config.ts');
+      const source = readFileSync(manifest, 'utf8');
+      writeFileSync(manifest, source.replace("externals: { allow: ['zod'] },", ''));
+      const { code, stdout } = archcheck(['--cwd', root]);
+      expect(stdout).not.toContain('is a dependency no layer may import');
+      expect(code).toBe(0);
+    });
+  });
+
+  test('two rules claiming the audit is a config error, not a double report', () => {
+    inCopyOf('dependencies', (root) => {
+      const manifest = join(root, 'architecture.config.ts');
+      const source = readFileSync(manifest, 'utf8');
+      writeFileSync(
+        manifest,
+        source.replace(
+          "params: { name: 'service', match: 'src/service/**', mayImport: ['domain'] },",
+          "params: {\n        name: 'service',\n        match: 'src/service/**',\n        mayImport: ['domain'],\n        auditsDependencies: true,\n      },",
+        ),
+      );
+      const { code, stderr } = archcheck(['--cwd', root]);
+      expect(code).toBe(2);
+      expect(stderr).toContain('params.auditsDependencies is set on 2 rules');
+      expect(stderr).toContain('exactly one layers rule owns the dependency audit');
+    });
   });
 });
 
@@ -531,6 +608,37 @@ describe('--write-graph then --ingest-graph', () => {
       expect(ingested.skipped).toEqual([]);
       expect(ingested.diagnostics).toEqual(direct.diagnostics);
     });
+  });
+
+  /**
+   * The AST kinds, which is the case the layered fixture cannot cover.
+   *
+   * Until 0.3.2 `banned-syntax` and `declared-field` walked the AST inside the contract, and an
+   * ingested graph has facts rather than source files — so on this lane both kinds found nothing,
+   * reported no skip, and the run read as clean. The parity test above passed throughout, because
+   * the layered fixture declares neither kind. This is the test that would have caught it.
+   */
+  test('the AST kinds find the same violations on the ingested lane', () => {
+    // One fixture per AST kind, with the rule that proves the kind actually ran.
+    const lanes = [
+      { fixture: 'lint', ruleId: 'no-empty-catch' },
+      { fixture: 'structure', ruleId: 'endpoints-declare-a-permission' },
+    ];
+    for (const lane of lanes) {
+      inCopyOf(lane.fixture, (root) => {
+        const direct = JSON.parse(archcheck(['--cwd', root, '--format', 'json']).stdout);
+        // The fixture has to have something to find, or parity is a comparison of two silences.
+        const fired = direct.diagnostics.map((one: { ruleId: string }) => one.ruleId);
+        expect(fired).toContain(lane.ruleId);
+
+        archcheck(['--cwd', root, '--write-graph', '--format', 'json']);
+        const ingested = JSON.parse(
+          archcheck(['--cwd', root, '--ingest-graph', '--format', 'json']).stdout,
+        );
+        expect(ingested.skipped).toEqual([]);
+        expect(ingested.diagnostics).toEqual(direct.diagnostics);
+      });
+    }
   });
 
   test('asking to both write and ingest is a config error, not a coin toss', () => {

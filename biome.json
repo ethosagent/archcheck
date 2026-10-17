@@ -10,7 +10,8 @@
       "!**/dist",
       "!**/generated",
       "!**/.archcheck",
-      "!**/fixtures"
+      "!fixtures",
+      "!examples/*/fixtures"
     ]
   },
   "formatter": {

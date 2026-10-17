@@ -7,6 +7,9 @@
  * files start drifting from the manifest — which is the one failure this whole pipeline exists to
  * prevent.
  */
+
+import { toBiomeConfig } from '../adapters/biomeConfig.js';
+import { type SinkEntry, toEslintConfig } from '../adapters/eslintConfig.js';
 import type { Fragment, FragmentTarget } from '../types.js';
 import { commentHeader, generatedMeta } from './header.js';
 
@@ -41,11 +44,28 @@ export function sortDeep(value: unknown): unknown {
 
 function jsonSink(target: FragmentTarget, fragments: Fragment[], source: string): SinkFile {
   const ruleIds = [...new Set(fragments.map((f) => f.ruleId))].sort();
+  const rules = fragments
+    .map((fragment) => ({ ruleId: fragment.ruleId, ...(fragment.content as object) }))
+    .sort((a, b) => a.ruleId.localeCompare(b.ruleId));
+
+  // What each editor adapter could NOT turn into a rule. A reader who sees a rule in this file
+  // would otherwise assume their editor shows it, and for several kinds it cannot: core ESLint has
+  // no filename rule and none that reads comment text. Naming them is why archcheck stays the gate.
+  //
+  // The two lists differ, and they have to be reported separately rather than merged. Biome cannot
+  // say `empty-catch` without saying more than the rule does, so a merged list would understate
+  // what ESLint covers and overstate what Biome does.
+  const entries = rules as unknown as SinkEntry[];
+  const byEslint = target === 'lint' ? toEslintConfig(entries).unexpressed : [];
+  const byBiome = target === 'lint' ? toBiomeConfig(entries).unexpressed : [];
+
   const body = {
-    $generated: generatedMeta(source, ruleIds),
-    rules: fragments
-      .map((fragment) => ({ ruleId: fragment.ruleId, ...(fragment.content as object) }))
-      .sort((a, b) => a.ruleId.localeCompare(b.ruleId)),
+    $generated: {
+      ...generatedMeta(source, ruleIds),
+      ...(byEslint.length === 0 ? {} : { notExpressedByEslint: byEslint }),
+      ...(byBiome.length === 0 ? {} : { notExpressedByBiome: byBiome }),
+    },
+    rules,
   };
   return {
     path: SINK_PATHS[target],

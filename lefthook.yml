@@ -8,8 +8,13 @@ pre-commit:
     generated-files-are-not-hand-edited:
       glob: 'generated/**'
       run: |
-        echo "generated/ is emitted from architecture.config.ts — edit the manifest and re-run"
-        echo "  npx archcheck emit"
+        # A REGENERATION is not a hand edit, and `emit --check` is what tells the two apart: it
+        # passes only when the committed output matches the manifest. This refused both equally,
+        # while `check-emit.sh` in CI required the output to be current — so the two gates
+        # contradicted each other and a legitimate `emit` result could not be committed at all.
+        bun run src/cli/index.ts emit --check >/dev/null 2>&1 && exit 0
+        echo "generated/ was hand-edited: it does not match architecture.config.ts"
+        echo "  edit the manifest and re-run: npx archcheck emit"
         exit 1
 
 pre-push:

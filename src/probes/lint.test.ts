@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { syntaxRequestsOf } from '../contracts/syntaxRequests.js';
 import { createNodeFileSystem } from '../fs/index.js';
 import { readGraph } from '../graph/index.js';
+import { requestsFingerprint } from '../graph/syntaxRequest.js';
 import type { ModuleGraph } from '../graph/types.js';
 import type { Result } from '../result.js';
 import type { Rule } from '../types.js';
@@ -12,10 +14,23 @@ import type { RunCtx } from './types.js';
 const ROOT = join(import.meta.dir, '..', '..', 'fixtures', 'repos', 'lint');
 const TSCONFIG = join(ROOT, 'tsconfig.json');
 
-let built: Result<ModuleGraph> | undefined;
-const sharedGraph = (): Result<ModuleGraph> => {
-  built ??= readGraph({ root: ROOT, tsconfigPath: TSCONFIG, cache: false });
-  return built;
+/**
+ * One graph per set of syntax questions, the way the facade builds it.
+ *
+ * The rule set decides what the graph collects, so a test that narrows `rules` needs a graph that
+ * was asked the narrowed question. Keying the cache on the request fingerprint keeps the reuse —
+ * every test that asks the same thing shares one parse — without letting one test read facts
+ * collected for another.
+ */
+const built = new Map<string, Result<ModuleGraph>>();
+const graphFor = (rules: readonly Rule[]) => (): Result<ModuleGraph> => {
+  const syntax = syntaxRequestsOf(rules);
+  const key = requestsFingerprint(syntax);
+  const already = built.get(key);
+  if (already !== undefined) return already;
+  const fresh = readGraph({ root: ROOT, tsconfigPath: TSCONFIG, cache: false, syntax });
+  built.set(key, fresh);
+  return fresh;
 };
 
 const RULES: Rule[] = [
@@ -58,15 +73,16 @@ const RULES: Rule[] = [
 ];
 
 function ctx(overrides: Partial<RunCtx> = {}): RunCtx {
+  const rules = overrides.rules ?? RULES;
   return {
     root: ROOT,
     tsconfigPath: TSCONFIG,
-    rules: RULES,
     fs: createNodeFileSystem(ROOT),
     configPath: 'architecture.config.ts',
     tests: DEFAULT_TEST_GLOBS,
-    graph: sharedGraph,
+    graph: graphFor(rules),
     ...overrides,
+    rules,
   };
 }
 

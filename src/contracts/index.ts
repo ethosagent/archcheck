@@ -6,6 +6,7 @@ export {
   type BannedSyntaxParams,
   bannedSyntaxApplies,
   bannedSyntaxContract,
+  bannedSyntaxRequest,
   findBannedOccurrences,
 } from './banned-syntax.js';
 export {
@@ -13,9 +14,16 @@ export {
   type DeclaredFieldParams,
   declaredFieldApplies,
   declaredFieldContract,
+  declaredFieldRequest,
   findMissingDeclarations,
   type MissingDeclaration,
 } from './declared-field.js';
+export {
+  type AuditPolicy,
+  dependencyNamesOf,
+  type PackageLike,
+  unapprovedDependencies,
+} from './dependencyAudit.js';
 export {
   asEncapsulationParams,
   type EncapsulationParams,
@@ -31,6 +39,14 @@ export {
   forbiddenApplies,
   forbiddenContract,
 } from './forbidden.js';
+export {
+  dimensionProblems,
+  dimensionsOfSide,
+  type LayerNames,
+  RESERVED_SIDE_KEYS,
+  type SideLike,
+  sideDimensionsMatch,
+} from './forbiddenDimensions.js';
 export {
   type EdgeFacts,
   type ForbiddenSide,
@@ -48,6 +64,7 @@ export {
 export {
   asLayersParams,
   buildLayerTable,
+  type DependencyAudit,
   type EdgeVerdict,
   type Layer,
   type LayersParams,
@@ -80,4 +97,5 @@ export {
   type SiblingVerdict,
   unitOf,
 } from './siblings.js';
+export { syntaxRequestsOf } from './syntaxRequests.js';
 export type { ContractType, EmitCtx, ExplainCtx, Refinement, ValidateCtx } from './types.js';

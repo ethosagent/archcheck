@@ -1,18 +1,33 @@
 import { matchesAny } from '../util/glob.js';
+import { type LayerNames, sideDimensionsMatch } from './forbiddenDimensions.js';
 import { packageMatchesAny } from './packageMatch.js';
 
-// A side of a forbidden rule, matching by layer and/or glob.
+/**
+ * A side of a forbidden rule, matching by dimension and/or glob.
+ *
+ * `layer` is not a special key. `'layer'` is the name of the DEFAULT dimension, so
+ * `{ layer: 'checkout' }` has always meant "the layer named checkout, on the layer axis" — it was
+ * simply the only axis there was. Any other key names a dimension the same way, which is how
+ * `{ runtime: 'client' }` works with no new syntax to parse.
+ */
 export type ForbiddenSide = {
   layer?: string;
   glob?: string | string[];
   except?: string | string[];
+  /** A dimension name. Its value is the layer this end must sit in on that axis. */
+  [dimension: string]: unknown;
 };
 
 // A target side, which may also ban by package for external edges.
 export type ForbiddenTarget = ForbiddenSide & { package?: string | string[] };
 
-// Facts about an edge used for matching.
-export type EdgeFacts = { path: string; layer: string | undefined; external: boolean };
+/** Facts about one end of an edge used for matching. */
+export type EdgeFacts = {
+  path: string;
+  external: boolean;
+  /** The layer this end sits in, on each declared axis. The default axis is named `layer`. */
+  layers: LayerNames;
+};
 
 function list(value: string | string[]): readonly string[] {
   return typeof value === 'string' ? [value] : value;
@@ -23,13 +38,10 @@ export function sideMatches(side: ForbiddenSide, edge: EdgeFacts): boolean {
   if (side.except !== undefined && matchesAny(list(side.except), edge.path)) {
     return false;
   }
-  if (side.layer !== undefined && side.layer !== edge.layer) {
-    return false;
-  }
   if (side.glob !== undefined && !matchesAny(list(side.glob), edge.path)) {
     return false;
   }
-  return true;
+  return sideDimensionsMatch(side, edge.layers);
 }
 
 // A package ban reads an external edge and a path ban reads an internal one.

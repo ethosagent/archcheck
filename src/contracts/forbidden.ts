@@ -16,6 +16,8 @@
 import { err, ok, type Result } from '../result.js';
 import type { EdgeFilter, Fragment, RawFinding, Rule } from '../types.js';
 import { globProblems } from '../util/glob.js';
+import { DEFAULT_DIMENSION, dimensionOf } from './dimensions.js';
+import { dimensionProblems, dimensionsOfSide } from './forbiddenDimensions.js';
 import {
   type EdgeFacts,
   type ForbiddenSide,
@@ -46,25 +48,36 @@ function asList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry) => typeof entry === 'string') : [];
 }
 
-function sideProblems(side: unknown, field: string, declaredLayers: Set<string>): string[] {
+/** The layer names declared on each axis: `layer` by default, plus anything #5 added. */
+type Axes = Map<string, Set<string>>;
+
+function sideProblems(side: unknown, field: string, axes: Axes): string[] {
   if (typeof side !== 'object' || side === null) {
     return [`params.${field} must be an object naming a layer, a glob, or a package`];
   }
   const problems: string[] = [];
   const keys = side as Record<string, unknown>;
-  const names = ['layer', 'glob', 'package'].filter((key) => keys[key] !== undefined);
-  if (names.length === 0) {
+  const dimensions = dimensionsOfSide(keys);
+  const named = ['glob', 'package'].filter((key) => keys[key] !== undefined);
+  if (named.length === 0 && Object.keys(dimensions).length === 0) {
     problems.push(
       `params.${field} declares nothing — a side with no layer, glob or package would match ` +
         'every edge, which is never the rule somebody meant to write',
     );
   }
+  // An axis nobody declared. Caught here rather than at run time, where it would ban no edge and
+  // look exactly like a rule that is satisfied.
+  for (const problem of dimensionProblems(keys, [...axes.keys()])) {
+    problems.push(`params.${field} ${problem}`);
+  }
   // The most common manifest typo, and the one a glob cannot catch: a layer nobody declared.
-  if (typeof keys.layer === 'string' && !declaredLayers.has(keys.layer)) {
-    const known = [...declaredLayers].sort().join(', ');
+  for (const [dimension, value] of Object.entries(dimensions)) {
+    const layers = axes.get(dimension);
+    if (layers === undefined || typeof value !== 'string' || layers.has(value)) continue;
+    const known = [...layers].sort().join(', ');
     problems.push(
-      `params.${field}.layer names an unknown layer '${keys.layer}' — declared layers are ` +
-        `${known.length > 0 ? known : 'none'}`,
+      `params.${field}.${dimension} names an unknown layer '${value}' on dimension ` +
+        `'${dimension}' — layers there are ${known.length > 0 ? known : 'none'}`,
     );
   }
   for (const key of ['glob', 'except'] as const) {
@@ -81,24 +94,31 @@ function validateParams(rule: Rule, ctx: ValidateCtx): Result<void> {
   const params = rule.params as Record<string, unknown>;
   const errors: string[] = [];
 
-  const declaredLayers = new Set(
-    ctx.rules
-      .filter((other) => other.kind === 'layers')
-      .map((other) => (other.params as Record<string, unknown>).name)
-      .filter((name): name is string => typeof name === 'string'),
-  );
+  // The default axis is always a known dimension, even in a manifest that declares no layers at
+  // all: `{ layer: ... }` must report an unknown LAYER, which is the useful message, rather than
+  // an unknown dimension, which would be a lie.
+  const axes: Axes = new Map([[DEFAULT_DIMENSION, new Set<string>()]]);
+  for (const other of ctx.rules) {
+    if (other.kind !== 'layers') continue;
+    const name = (other.params as Record<string, unknown>).name;
+    const dimension = dimensionOf(other);
+    const already = axes.get(dimension) ?? new Set<string>();
+    if (typeof name === 'string') already.add(name);
+    axes.set(dimension, already);
+  }
 
-  errors.push(...sideProblems(params.from, 'from', declaredLayers));
-  errors.push(...sideProblems(params.to, 'to', declaredLayers));
+  errors.push(...sideProblems(params.from, 'from', axes));
+  errors.push(...sideProblems(params.to, 'to', axes));
 
   const to = params.to as Record<string, unknown> | null;
   if (to !== null && typeof to === 'object' && to.package !== undefined) {
     // A package ban reads an external edge and a path ban reads an internal one, so a `to` that
     // declares both can never match anything. Rejected rather than silently matching nothing.
-    if (to.layer !== undefined || to.glob !== undefined) {
+    if (to.glob !== undefined || Object.keys(dimensionsOfSide(to)).length > 0) {
       errors.push(
-        'params.to declares package alongside layer or glob — a package ban reads an external ' +
-          'import and a layer or glob reads an internal one, so the pair matches nothing',
+        'params.to declares package alongside a layer, a dimension or a glob — a package ban ' +
+          'reads an external import and the others read an internal one, so the pair matches ' +
+          'nothing',
       );
     }
     if (typeof params.from === 'object' && params.from !== null) {
@@ -119,7 +139,9 @@ function validateParams(rule: Rule, ctx: ValidateCtx): Result<void> {
 
 function describeSide(side: ForbiddenSide | ForbiddenTarget): string {
   const parts: string[] = [];
-  if (side.layer !== undefined) parts.push(`layer ${side.layer}`);
+  for (const [dimension, value] of Object.entries(dimensionsOfSide(side))) {
+    parts.push(`${dimension} ${String(value)}`);
+  }
   if (side.glob !== undefined) parts.push(asList(side.glob).join(', '));
   const target = side as ForbiddenTarget;
   if (target.package !== undefined) parts.push(`package ${asList(target.package).join(', ')}`);

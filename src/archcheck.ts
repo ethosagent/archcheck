@@ -20,6 +20,7 @@ import {
   writeBaseline,
 } from './baseline/index.js';
 import { contractFor, validateParamsByKind, warningsFor } from './contracts/registry.js';
+import { syntaxRequestsOf } from './contracts/syntaxRequests.js';
 import type { ExplainCtx } from './contracts/types.js';
 import {
   applyEmit,
@@ -34,7 +35,13 @@ import { createNodeFileSystem } from './fs/index.js';
 import { readGraph } from './graph/index.js';
 import type { ModuleGraph } from './graph/types.js';
 import { type NormalizeInput, normalize } from './normalize/index.js';
-import { createGraphProbe, GRAPH_REPORT_PATH, toGraphReport } from './probes/graph.js';
+import {
+  createGraphProbe,
+  fromGraphReport,
+  GRAPH_REPORT_PATH,
+  type GraphReport,
+  toGraphReport,
+} from './probes/graph.js';
 import { createLintProbe } from './probes/lint.js';
 import { createModelProbe } from './probes/model/index.js';
 import { createStructureProbe } from './probes/structure.js';
@@ -183,20 +190,51 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
       // One graph per run, built lazily and memoised. A probe that builds its own has broken the
       // property the whole design rests on.
       let graphOnce: Result<ModuleGraph> | undefined;
+      const fs = createNodeFileSystem(registry.root);
+
+      /**
+       * `--ingest-graph` replaces the WHOLE graph, not one probe's view of it.
+       *
+       * That is the point of the flag: CI builds the graph once and every later job reads the
+       * report instead of a Program. Until 0.3.2 only the graph probe was served this way, so a
+       * run with the flag still built a Program for `banned-syntax` and `declared-field` —
+       * paying the cost the flag exists to avoid, and failing outright wherever the later job has
+       * the report but not the sources. Reading it here serves all eight kinds from the report.
+       */
+      const ingested = (): Result<ModuleGraph> => {
+        const raw = fs.read(GRAPH_REPORT_PATH);
+        if (raw === undefined) {
+          return err([`cannot ingest ${GRAPH_REPORT_PATH}: no such file`]);
+        }
+        try {
+          const report = JSON.parse(raw) as GraphReport;
+          if (report?.schemaVersion !== 1 || !Array.isArray(report.edges)) {
+            throw new Error('not a graph report of schemaVersion 1');
+          }
+          return ok(fromGraphReport(report, registry.root));
+        } catch (error) {
+          return err([`cannot ingest ${GRAPH_REPORT_PATH}: ${(error as Error).message}`]);
+        }
+      };
+
       const ctx: RunCtx = {
         root: registry.root,
         tsconfigPath,
-        fs: createNodeFileSystem(registry.root),
+        fs,
         tests: registry.manifest.tests ?? DEFAULT_TEST_GLOBS,
         configPath: repoRelative(registry.root, registry.configPath),
         rules,
         ...(checkOptions.changed === undefined ? {} : { changed: checkOptions.changed }),
         graph: () => {
-          graphOnce ??= readGraph({
-            root: registry.root,
-            tsconfigPath,
-            ...(checkOptions.cache === undefined ? {} : { cache: checkOptions.cache }),
-          });
+          graphOnce ??=
+            checkOptions.ingestGraph === true
+              ? ingested()
+              : readGraph({
+                  root: registry.root,
+                  tsconfigPath,
+                  syntax: syntaxRequestsOf(rules),
+                  ...(checkOptions.cache === undefined ? {} : { cache: checkOptions.cache }),
+                });
           return graphOnce;
         },
       };
@@ -226,23 +264,6 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
       for (const probe of probes()) {
         const handled = rules.some((rule) => probe.handles.includes(rule.kind));
         if (!handled) continue;
-
-        if (checkOptions.ingestGraph === true && probe.name === 'graph' && probe.ingest) {
-          const reportPath = join(registry.root, GRAPH_REPORT_PATH);
-          try {
-            const { readFileSync } = await import('node:fs');
-            const report: unknown = JSON.parse(readFileSync(reportPath, 'utf8'));
-            inputs.push({ findings: probe.ingest(report, ctx), detectedBy: probe.name });
-            continue;
-          } catch (error) {
-            skipped.push({
-              probe: probe.name,
-              reason: `cannot ingest ${GRAPH_REPORT_PATH}: ${(error as Error).message}`,
-            });
-            for (const kind of probe.handles) unjudgedKinds.add(kind);
-            continue;
-          }
-        }
 
         const outcome = await probe.run(ctx);
         if (isSkip(outcome)) {
@@ -448,6 +469,17 @@ export function describeViolations(ruleId: string, diagnostics: readonly Diagnos
   return lines.join('\n');
 }
 
+/**
+ * Fixture verification, exposed here rather than reached for by the CLI. `cli-owns-no-behaviour`
+ * said so in its own remedy: the CLI parses, calls and reports, and a capability belongs on this
+ * surface so a programmatic consumer reaches it the same way.
+ */
+export {
+  type FixtureResult,
+  fixtureNames,
+  type VerifyOptions,
+  verifyFixtures,
+} from './fixtures/verify.js';
 /**
  * The order matters. An expired exception is a MANIFEST problem (exit 2) and is checked first,
  * because the violations it stopped covering are a consequence of it rather than news of their own.

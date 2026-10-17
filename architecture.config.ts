@@ -81,6 +81,28 @@ export default defineArchitecture({
     },
     {
       ...law,
+      id: 'fixture-verification-runs-rules-and-declares-none',
+      statement: 'fixture verification places a fixture and runs the checks, and declares no rule',
+      params: {
+        name: 'fixtures',
+        match: 'src/fixtures/**',
+        mayImport: ['kernel', 'util'],
+      },
+      remedy: {
+        summary: 'it proves a rule catches something; the rule itself belongs in the manifest',
+      },
+    },
+    {
+      ...law,
+      id: 'an-adapter-translates-and-decides-nothing',
+      statement: 'an adapter turns a generated sink into another tool shape, and judges nothing',
+      params: { name: 'adapter', match: 'src/adapters/**', mayImport: ['kernel'] },
+      remedy: {
+        summary: 'it only translates; a rule about what is allowed belongs in the manifest',
+      },
+    },
+    {
+      ...law,
       id: 'the-baseline-is-a-leaf',
       statement: 'the baseline reads and writes one file and knows nothing about rules',
       params: { name: 'baseline', match: 'src/baseline/**', mayImport: ['kernel'] },
@@ -103,8 +125,17 @@ export default defineArchitecture({
         name: 'contract',
         match: 'src/contracts/**',
         mayImport: ['kernel', 'util', 'graph'],
+        // The compiler API is how this layer stopped deciding and started walking. Two kinds
+        // reached for `typescript` from in here, which is why they could not run against an
+        // ingested graph and were never cached. The seam that fixed it is only kept by a gate:
+        // the graph layer collects syntax facts, and a contract reads them.
+        externals: { deny: ['typescript'] },
       },
-      remedy: { summary: 'return the decision as data and let a probe do the walking' },
+      remedy: {
+        summary:
+          'return the decision as data and let a probe do the walking — a walk belongs in ' +
+          'src/graph/syntax.ts, and the contract reads the fact it produced',
+      },
     },
     {
       ...law,
@@ -152,7 +183,7 @@ export default defineArchitecture({
       params: {
         name: 'emit',
         match: 'src/emit/**',
-        mayImport: ['kernel', 'util', 'contract', 'registry', 'coverage'],
+        mayImport: ['kernel', 'util', 'contract', 'registry', 'coverage', 'adapter'],
       },
       remedy: {
         summary: 'emit is a pure function of the manifest; move the runtime part to a probe',
@@ -180,6 +211,7 @@ export default defineArchitecture({
         mayImport: [
           'kernel',
           'util',
+          'fixtures',
           'registry',
           'graph',
           'contract',
