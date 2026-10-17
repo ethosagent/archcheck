@@ -16,17 +16,30 @@
  */
 import { err, ok, type Result } from '../result.js';
 import type { Fragment, RawFinding, Rule } from '../types.js';
+import { dirGlobOf, dirsOf, expandForDir, isDirSelector } from './requiredDirs.js';
 import type { ContractType, EmitCtx, ExplainCtx, Refinement, ValidateCtx } from './types.js';
 
 export type RequiredFileParams = {
-  /** A path glob, or a registry selector like `rule[severity=error]`. */
+  /**
+   * A path glob, a registry selector like `rule[severity=error]`, or a directory selector like
+   * `dir[packages/*]`. Iterating files reports one finding per file, which for a per-directory
+   * requirement says the same thing once for every file in the directory.
+   */
   forEach: string;
   /**
-   * A path template. `{id}` for a rule; for a file, `{dir}`, `{name}`, `{base}`, `{ext}` and
-   * `{Base}` — the base with its first letter capitalised, which is what the twin convention
-   * `blobStore.ts` → `memoryBlobStore.ts` actually needs.
+   * A path template. `{id}` for a rule; `{dir}`, `{dirname}` and `{parent}` for a directory; for
+   * a file, `{dir}`, `{name}`, `{base}`, `{ext}` and `{Base}` — the base with its first letter
+   * capitalised, which is what the twin convention `blobStore.ts` → `memoryBlobStore.ts` needs.
+   *
+   * Optional only with `mustNotExist`, where the matched path is its own expectation.
    */
-  expect: string;
+  expect?: string;
+  /**
+   * Invert the question. Without it a subject with no companion is the finding; with it, every
+   * subject that EXISTS is the finding — "there is no `src/utils/` dumping ground", "no `.env` is
+   * committed". The subject list is unchanged; only which answer is a violation moves.
+   */
+  mustNotExist?: boolean;
 };
 
 export function asRequiredFileParams(rule: Rule): RequiredFileParams {
@@ -87,6 +100,8 @@ export function subjectsFor(
   const selector = RULE_SELECTOR.exec(params.forEach);
   if (selector) {
     const [, field, value] = selector;
+    // Validation guarantees `expect` for a rule selector, so the fallback is unreachable.
+    const template = params.expect ?? '';
     return ctx.rules
       .filter(
         (rule) => String((rule as unknown as Record<string, unknown>)[field as string]) === value,
@@ -94,14 +109,25 @@ export function subjectsFor(
       .filter(canEverFire)
       .map((rule) => ({
         subject: rule.id,
-        expected: params.expect.replaceAll('{id}', rule.id),
+        expected: template.replaceAll('{id}', rule.id),
         label: `rule '${rule.id}'`,
       }));
   }
 
+  const dirGlob = dirGlobOf(params.forEach);
+  if (dirGlob !== undefined) {
+    // One subject per directory, not per file. The whole point: a directory with forty files that
+    // lacks a README is one missing README, not forty.
+    return dirsOf(dirGlob, ctx.files).map((dir) => ({
+      subject: dir,
+      expected: params.expect === undefined ? dir : expandForDir(params.expect, dir),
+      label: `directory '${dir}'`,
+    }));
+  }
+
   return ctx.files.map((file) => ({
     subject: file,
-    expected: expandForFile(params.expect, file),
+    expected: params.expect === undefined ? file : expandForFile(params.expect, file),
     label: file,
   }));
 }
@@ -115,16 +141,47 @@ function validateParams(rule: Rule, _ctx: ValidateCtx): Result<void> {
       "params.forEach is required — a path glob, or a selector like 'rule[severity=error]'",
     );
   }
-  if (typeof params.expect !== 'string' || params.expect.length === 0) {
+  const mustNotExist = params.mustNotExist;
+  if (mustNotExist !== undefined && typeof mustNotExist !== 'boolean') {
+    errors.push('params.mustNotExist must be true or false when given');
+  }
+  // `expect` is what a subject is checked FOR, so it is required — except under mustNotExist,
+  // where the matched path is its own expectation and a template would be asking for a second one.
+  if (mustNotExist !== true && (typeof params.expect !== 'string' || params.expect.length === 0)) {
     errors.push('params.expect is required — the path template the companion file must be at');
   }
+  if (mustNotExist === true && isRuleSelector(params.forEach as string)) {
+    errors.push(
+      'params.mustNotExist cannot iterate rules — it reports paths that exist, and a rule is ' +
+        'not a path. Point forEach at a glob, or at dir[...]',
+    );
+  }
   if (typeof params.forEach === 'string' && typeof params.expect === 'string') {
-    if (isRuleSelector(params.forEach) && !params.expect.includes('{id}')) {
+    const dir = isDirSelector(params.forEach);
+    const rules = isRuleSelector(params.forEach);
+    if (rules && !params.expect.includes('{id}')) {
       errors.push(
         'params.expect must contain {id} when forEach iterates rules, or every rule expects the same one file',
       );
     }
-    if (!isRuleSelector(params.forEach) && !/\{(dir|base|Base|name|ext)\}/.test(params.expect)) {
+    if (dir && !/\{(dir|dirname|parent)\}/.test(params.expect)) {
+      errors.push(
+        'params.expect must contain {dir}, {dirname} or {parent} when forEach iterates ' +
+          'directories, or every directory expects the same one file',
+      );
+    }
+    // The message a reader needs is which placeholders this forEach actually offers. Saying only
+    // "unknown placeholder" would leave them guessing which form they are in.
+    const wrongForm = !dir && !rules && /\{(dirname|parent)\}/.test(params.expect);
+    if (wrongForm) {
+      errors.push(
+        'params.expect uses {dirname} or {parent}, which only a directory-iterating rule ' +
+          'offers — write forEach as dir[<glob>], or use {dir}, {base}, {name} or {ext}',
+      );
+    }
+    // Suppressed when the message above already fired. Both describe the same single defect,
+    // and the generic one would tell an author who DID write a placeholder to write one.
+    if (!dir && !rules && !wrongForm && !/\{(dir|base|Base|name|ext)\}/.test(params.expect)) {
       errors.push(
         'params.expect must contain {dir}, {base}, {name} or {ext} when forEach iterates files, ' +
           'or every file expects the same one companion',
@@ -143,7 +200,8 @@ function emitFragments(rule: Rule, _ctx: EmitCtx): Fragment[] {
       ruleId: rule.id,
       content: {
         forEach: params.forEach,
-        expect: params.expect,
+        ...(params.expect === undefined ? {} : { expect: params.expect }),
+        ...(params.mustNotExist === true ? { mustNotExist: true } : {}),
         message: `${rule.statement} — ${rule.remedy.summary}`,
       },
     },
@@ -152,6 +210,12 @@ function emitFragments(rule: Rule, _ctx: EmitCtx): Fragment[] {
 
 function explainFinding(finding: RawFinding, rule: Rule, _ctx: ExplainCtx): string {
   const evidence = finding.evidence as Record<string, unknown>;
+  if (evidence.mustNotExist === true) {
+    return [
+      `${String(evidence.expected)} exists, and this rule says it must not`,
+      `  → ${rule.remedy.summary}`,
+    ].join('\n');
+  }
   return [
     `${String(evidence.label)} has no ${String(evidence.expected)}`,
     `  expected at: ${String(evidence.expected)}`,
@@ -161,6 +225,12 @@ function explainFinding(finding: RawFinding, rule: Rule, _ctx: ExplainCtx): stri
 
 function refineFinding(finding: RawFinding, rule: Rule): Refinement {
   const evidence = finding.evidence as Record<string, unknown>;
+  if (evidence.mustNotExist === true) {
+    return {
+      statement: `${String(evidence.expected)} must not exist`,
+      remedy: rule.remedy,
+    };
+  }
   return {
     statement: `${String(evidence.label)} is missing ${String(evidence.expected)}`,
     remedy: rule.remedy,

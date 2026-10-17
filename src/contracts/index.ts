@@ -91,6 +91,7 @@ export {
   requiredFileContract,
   subjectsFor,
 } from './required-file.js';
+export { dirGlobOf, dirsOf, expandForDir, isDirSelector } from './requiredDirs.js';
 export {
   resolveSiblingEdge,
   type SiblingPolicy,
