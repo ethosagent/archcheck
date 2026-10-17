@@ -50,6 +50,16 @@ export type Remedy = {
 };
 
 /** What the consumer writes, one entry per rule in `architecture.config.ts`. */
+/**
+ * Which edges a rule looks at. `'all'` by default, which is what every rule did before this
+ * existed, so declaring nothing changes nothing.
+ *
+ * `'production'` skips edges that start in a test file. Tests legitimately reach for fixtures,
+ * fakes and internals, and the alternative was declaring a test layer with `mayImport: '*'` and
+ * keeping it in step with every naming convention in the repository.
+ */
+export type EdgeFilter = 'all' | 'production';
+
 export type Rule = {
   /** Immutable once committed. Renaming means a new id plus `replaces` (LLD §1.6). */
   id: string;

@@ -52,6 +52,7 @@ import type {
   SkipRecord,
 } from './types.js';
 import { repoRelative } from './util/paths.js';
+import { DEFAULT_TEST_GLOBS } from './util/testEdges.js';
 
 /** Exit codes are an API. An agent branches on them, so they are frozen from v0.1 (LLD §6). */
 export const EXIT = {
@@ -186,6 +187,7 @@ export function load(options: LoadOptions = {}): Result<ArchCheck> {
         root: registry.root,
         tsconfigPath,
         fs: createNodeFileSystem(registry.root),
+        tests: registry.manifest.tests ?? DEFAULT_TEST_GLOBS,
         configPath: repoRelative(registry.root, registry.configPath),
         rules,
         ...(checkOptions.changed === undefined ? {} : { changed: checkOptions.changed }),

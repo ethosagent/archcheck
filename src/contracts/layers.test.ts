@@ -31,7 +31,7 @@ const RULES: Rule[] = [
 
 const table = buildLayerTable(RULES);
 const layer = (name: string) => table.layers.find((l) => l.name === name);
-const staticEdge = { external: false, typeOnly: false };
+const staticEdge = { external: false, typeOnly: false, test: false };
 const paths = { from: 'src/one/a.ts', to: 'src/two/b.ts' };
 
 describe('resolution order — every case has a test', () => {
@@ -44,10 +44,7 @@ describe('resolution order — every case has a test', () => {
       table,
       layer('contracts'),
       undefined,
-      {
-        external: true,
-        typeOnly: false,
-      },
+      { external: true, typeOnly: false, test: false },
       paths,
     );
     expect(verdict.allowed).toBe(true);
@@ -88,7 +85,7 @@ describe('resolution order — every case has a test', () => {
   });
 
   test('a type-only edge is still a dependency unless the layer says otherwise', () => {
-    const typeEdge = { external: false, typeOnly: true };
+    const typeEdge = { external: false, typeOnly: true, test: false };
     expect(resolveEdge(table, layer('domain'), 'service', typeEdge, paths).allowed).toBe(false);
 
     const lenient = buildLayerTable([
@@ -321,5 +318,34 @@ describe('sibling units inside one layer', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.join('\n')).toContain('spans directory levels');
+  });
+});
+
+describe('test edges', () => {
+  const testEdge = { external: false, typeOnly: false, test: true };
+
+  const productionOnly = buildLayerTable([
+    layerRule('domain-is-pure', 'domain', [], { edges: 'production', catchesUnlayered: true }),
+  ]);
+  const domain = productionOnly.layers[0];
+
+  test("'production' lets an edge from a test file past, and still fails a production one", () => {
+    const fromTest = resolveEdge(productionOnly, domain, 'service', testEdge, paths);
+    expect(fromTest.allowed).toBe(true);
+    const fromSource = resolveEdge(productionOnly, domain, 'service', staticEdge, paths);
+    expect(fromSource.allowed).toBe(false);
+  });
+
+  test("the default 'all' judges a test edge like any other", () => {
+    const verdict = resolveEdge(table, layer('domain'), 'service', testEdge, paths);
+    expect(verdict.allowed).toBe(false);
+  });
+
+  test('an unknown edges value is a config error', () => {
+    const rule = layerRule('bad-edges', 'domain', [], { edges: 'staging' });
+    const result = layersContract.validate(rule, { rules: [rule] });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.join(' ')).toContain("params.edges must be 'all' or 'production'");
   });
 });

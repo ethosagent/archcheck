@@ -38,6 +38,12 @@ export type RunCtx = {
   fs: FileSystem;
   /** Repo-relative path of the manifest — where a registry-level finding is reported against. */
   configPath: string;
+  /**
+   * Globs naming the test files. Manifest configuration, so it is NOT stored on the cached graph:
+   * a flag derived from the manifest would go stale the moment somebody edited the globs, with
+   * nothing to notice.
+   */
+  tests: readonly string[];
 };
 
 export type Probe = {
