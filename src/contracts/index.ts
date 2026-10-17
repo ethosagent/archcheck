@@ -60,4 +60,10 @@ export {
   requiredFileContract,
   subjectsFor,
 } from './required-file.js';
+export {
+  resolveSiblingEdge,
+  type SiblingPolicy,
+  type SiblingVerdict,
+  unitOf,
+} from './siblings.js';
 export type { ContractType, EmitCtx, ExplainCtx, Refinement, ValidateCtx } from './types.js';
