@@ -29,6 +29,14 @@ export type ArchitectureManifest = {
    * pretending to be a document (LLD §1.9).
    */
   docs?: string[];
+  /**
+   * Which files are tests, as globs. Defaults to `DEFAULT_TEST_GLOBS` in `src/util/testEdges.ts`,
+   * which follows the conventions almost every repository already has. Listed there and not here,
+   * so there is one copy of them.
+   *
+   * A rule reads this through `edges: 'production'`, which skips edges starting in a test file.
+   */
+  tests?: string[];
   /** The only place a rule is defined. */
   rules: Rule[];
   /**

@@ -5,6 +5,7 @@ import { readGraph } from '../graph/index.js';
 import type { ModuleGraph } from '../graph/types.js';
 import type { Result } from '../result.js';
 import type { Rule } from '../types.js';
+import { DEFAULT_TEST_GLOBS } from '../util/testEdges.js';
 import { createLintProbe } from './lint.js';
 import type { RunCtx } from './types.js';
 
@@ -63,6 +64,7 @@ function ctx(overrides: Partial<RunCtx> = {}): RunCtx {
     rules: RULES,
     fs: createNodeFileSystem(ROOT),
     configPath: 'architecture.config.ts',
+    tests: DEFAULT_TEST_GLOBS,
     graph: sharedGraph,
     ...overrides,
   };

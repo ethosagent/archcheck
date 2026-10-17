@@ -6,6 +6,7 @@ import { createNodeFileSystem } from '../fs/index.js';
 import { readGraph } from '../graph/index.js';
 import { createGraphProbe } from '../probes/graph.js';
 import type { RawFinding, Rule } from '../types.js';
+import { DEFAULT_TEST_GLOBS } from '../util/testEdges.js';
 import { canonicalJson, computeIdentity } from './identity.js';
 import { normalize } from './normalize.js';
 
@@ -120,6 +121,7 @@ describe('identity stability against a real file edit', () => {
         rules,
         fs: createNodeFileSystem(work),
         configPath: 'architecture.config.ts',
+        tests: DEFAULT_TEST_GLOBS,
         graph: () =>
           readGraph({ root: work, tsconfigPath: join(work, 'tsconfig.json'), cache: false }),
       };

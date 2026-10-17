@@ -7,6 +7,8 @@
  *
  * DEFAULT DENY is a property of this kind, not a setting. Resolution order for an edge A → B:
  *
+ *   0. A is a test file and this rule only
+ *      looks at production edges            → allowed (out of scope, not permitted)
  *   1. B is external                        → allowed (a separate rule governs dependencies)
  *   2. A and B in the same layer, and that
  *      layer denies sibling units, and they
@@ -27,8 +29,9 @@
 
 import { describeMatch, isImplementsMatch, isValidMatch, type LayerMatch } from '../graph/match.js';
 import { err, ok, type Result } from '../result.js';
-import type { Fragment, RawFinding, Rule } from '../types.js';
+import type { EdgeFilter, Fragment, RawFinding, Rule } from '../types.js';
 import { globProblems } from '../util/glob.js';
+import { edgeInScope } from '../util/testEdges.js';
 import { resolveSiblingEdge, type SiblingPolicy } from './siblings.js';
 import type { ContractType, EmitCtx, ExplainCtx, Refinement, ValidateCtx } from './types.js';
 
@@ -52,6 +55,12 @@ export type LayersParams = {
   siblings?: SiblingPolicy;
   /** What one unit is, as a glob matching directories: `'src/features/*'`. */
   unit?: string;
+  /**
+   * Which edges this rule looks at. `'all'` by default. `'production'` skips edges that start in
+   * a test file, so a test may reach for a fixture or an internal without the layer having to
+   * declare a test layer with `mayImport: '*'`.
+   */
+  edges?: EdgeFilter;
 };
 
 export type Layer = {
@@ -62,6 +71,7 @@ export type Layer = {
   ignoreTypeOnly: boolean;
   siblings: SiblingPolicy;
   unit: string | undefined;
+  edges: EdgeFilter;
 };
 
 export type LayerTable = {
@@ -87,6 +97,7 @@ export function buildLayerTable(rules: readonly Rule[]): LayerTable {
       ignoreTypeOnly: params.ignoreTypeOnly === true,
       siblings: params.siblings ?? 'allow',
       unit: params.unit,
+      edges: params.edges ?? 'all',
     };
   });
   const owner =
@@ -120,11 +131,13 @@ export function resolveEdge(
   table: LayerTable,
   fromLayer: Layer | undefined,
   toLayerName: string | undefined,
-  edge: { external: boolean; typeOnly: boolean },
+  edge: { external: boolean; typeOnly: boolean; test: boolean },
   paths: { from: string; to: string },
 ): EdgeVerdict {
   if (edge.external) return { allowed: true };
   if (fromLayer === undefined) return { allowed: true };
+  // Scope, not law: a rule that only looks at production edges has nothing to say about this one.
+  if (!edgeInScope(fromLayer.edges, edge.test)) return { allowed: true };
   if (fromLayer.ignoreTypeOnly && edge.typeOnly) return { allowed: true };
   if (toLayerName === undefined) {
     // The target is internal but declared by nobody. Its own `unlayered` finding is the report:
@@ -208,6 +221,11 @@ function validateParams(rule: Rule, ctx: ValidateCtx): Result<void> {
     }
   }
 
+  const edges = params.edges;
+  if (edges !== undefined && edges !== 'all' && edges !== 'production') {
+    errors.push(`params.edges must be 'all' or 'production' (got ${JSON.stringify(edges)})`);
+  }
+
   const siblings = params.siblings;
   if (siblings !== undefined && siblings !== 'allow' && siblings !== 'deny') {
     errors.push(`params.siblings must be 'allow' or 'deny' (got ${JSON.stringify(siblings)})`);
@@ -276,6 +294,7 @@ function emitFragments(rule: Rule, ctx: EmitCtx): Fragment[] {
         ignoreTypeOnly: self.ignoreTypeOnly,
         catchesUnlayered: table.unlayeredOwner === rule.id,
         ...(self.unit === undefined ? {} : { siblings: self.siblings, unit: self.unit }),
+        ...(self.edges === 'all' ? {} : { edges: self.edges }),
         statement: rule.statement,
       },
     },

@@ -15,6 +15,7 @@ import { fileMatches } from '../graph/match.js';
 import type { Edge, FileFacts, ModuleGraph } from '../graph/types.js';
 import type { RawFinding } from '../types.js';
 import { repoRelative } from '../util/paths.js';
+import { isTestFile } from '../util/testEdges.js';
 import type { Probe, RunCtx, Skip } from './types.js';
 
 export const GRAPH_REPORT_PATH = '.archcheck/graph.json';
@@ -146,7 +147,19 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
     const to = edge.external ? undefined : layerFor(edge.to);
     const fromPath = repoRelative(ctx.root, edge.from);
     const toPath = edge.external ? edge.specifier : repoRelative(ctx.root, edge.to);
-    const verdict = resolveEdge(table, from, to?.name, edge, { from: fromPath, to: toPath });
+    // Computed here rather than stored on the cached edge: the globs are manifest configuration,
+    // and a manifest-derived flag written into a fact cache goes stale with nothing to notice.
+    const fromIsTest = isTestFile(ctx.tests, fromPath);
+    const verdict = resolveEdge(
+      table,
+      from,
+      to?.name,
+      { ...edge, test: fromIsTest },
+      {
+        from: fromPath,
+        to: toPath,
+      },
+    );
     if (verdict.allowed) continue;
     findings.push({
       ruleId: verdict.ruleId,
@@ -158,6 +171,7 @@ function evaluate(graph: ModuleGraph, ctx: RunCtx): RawFinding[] {
         to: toPath,
         fromLayer: verdict.fromLayer,
         toLayer: verdict.toLayer,
+        test: fromIsTest,
         ...(verdict.fromUnit === undefined
           ? {}
           : { fromUnit: verdict.fromUnit, toUnit: verdict.toUnit }),

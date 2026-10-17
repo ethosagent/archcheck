@@ -5,6 +5,7 @@ import { readGraph } from '../graph/index.js';
 import type { ModuleGraph } from '../graph/types.js';
 import { ok, type Result } from '../result.js';
 import type { Rule } from '../types.js';
+import { DEFAULT_TEST_GLOBS } from '../util/testEdges.js';
 import { createGraphProbe, toGraphReport } from './graph.js';
 import type { RunCtx } from './types.js';
 
@@ -53,6 +54,7 @@ function ctx(overrides: Partial<RunCtx> = {}): RunCtx {
     rules: RULES,
     fs: createNodeFileSystem(ROOT),
     configPath: 'architecture.config.ts',
+    tests: DEFAULT_TEST_GLOBS,
     graph: sharedGraph,
     ...overrides,
   };
@@ -77,6 +79,7 @@ describe('run', () => {
       fromLayer: 'domain',
       toLayer: 'service',
       specifier: '../services/write.js',
+      test: false,
     });
     expect(edgeViolation?.line).toBe(3);
   });
