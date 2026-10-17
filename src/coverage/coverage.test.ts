@@ -138,3 +138,26 @@ describe('the fenced region', () => {
     expect(replaceFencedRegion(`# Doc\n${FENCE_END}\n${FENCE_BEGIN}\n`, table)).toBeUndefined();
   });
 });
+
+describe('coveredBy in the generated output', () => {
+  const covered: Rule = {
+    ...rule('adapters-pass-the-suite', 'proxy'),
+    coveredBy: { tests: ['src/storage/**/*.contract.test.ts'], name: 'storage contract' },
+  };
+
+  test('the column appears only when a rule fills it', () => {
+    const plain = renderRulesTable(
+      rulesDocument([rule('a', 'proxy')], coverageOf([rule('a', 'proxy')])),
+    );
+    expect(plain).not.toContain('Covered by');
+    const withColumn = renderRulesTable(rulesDocument([covered], coverageOf([covered])));
+    expect(withColumn).toContain('| | Rule | Statement | Kind | Severity | Covered by |');
+    expect(withColumn).toContain('`src/storage/**/*.contract.test.ts`');
+  });
+
+  test('rules.json carries coveredBy, and omits it where absent', () => {
+    const document = rulesDocument([covered, rule('b', 'proxy')], coverageOf([covered]));
+    expect(document.rules[0]?.coveredBy?.name).toBe('storage contract');
+    expect(document.rules[1]?.coveredBy).toBeUndefined();
+  });
+});

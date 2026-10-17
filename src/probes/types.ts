@@ -15,6 +15,14 @@ import type { ModuleGraph } from '../graph/types.js';
 import type { Result } from '../result.js';
 import type { ContractKind, RawFinding, Rule } from '../types.js';
 
+/**
+ * Why a probe runs. A probe normally runs because an active rule has a kind it handles, which is
+ * what `handles` says. `appliesTo` exists for the other reason: a rule-level FIELD, which has no
+ * kind to dispatch on — `coveredBy` is on any rule, of any kind. A probe that does not set it
+ * keeps the `handles` behaviour exactly.
+ */
+export type ProbeApplies = (rules: readonly Rule[]) => boolean;
+
 /** A probe that could not run. `skipped` in the RunResult is built from these. */
 export type Skip = { skipped: true; reason: string };
 
@@ -49,6 +57,8 @@ export type RunCtx = {
 export type Probe = {
   name: string;
   handles: readonly ContractKind[];
+  /** Run for a reason other than a kind. Defaults to the `handles` check. */
+  appliesTo?: ProbeApplies;
   run(ctx: RunCtx): Promise<RawFinding[] | Skip>;
   /** Map a report another gate wrote back into findings. */
   ingest?(report: unknown, ctx: RunCtx): RawFinding[];

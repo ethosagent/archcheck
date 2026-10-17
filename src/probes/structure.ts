@@ -18,6 +18,7 @@ import {
 import { asRequiredFileParams, isRuleSelector, subjectsFor } from '../contracts/required-file.js';
 import type { ModuleGraph } from '../graph/types.js';
 import type { RawFinding } from '../types.js';
+import { declaresTest } from '../util/coveredBy.js';
 import { repoRelative } from '../util/paths.js';
 import type { Probe, RunCtx, Skip } from './types.js';
 
@@ -45,6 +46,50 @@ function requiredFileFindings(ctx: RunCtx): RawFinding[] {
           subject: subject.subject,
           expected: subject.expected,
           label: subject.label,
+        },
+        identity: '',
+      });
+    }
+  }
+
+  return findings;
+}
+
+/**
+ * `coveredBy` is a rule-level field, so this sweep walks every active rule rather than the rules
+ * of one kind. It asks whether the named test files exist, and whether a named title appears in
+ * them. It never runs them — which is why a rule covered this way stays a proxy.
+ */
+function coveredByFindings(ctx: RunCtx): RawFinding[] {
+  const findings: RawFinding[] = [];
+
+  for (const rule of ctx.rules) {
+    const covered = rule.coveredBy;
+    if (covered === undefined) continue;
+
+    for (const pattern of covered.tests) {
+      const matched = ctx.fs.glob(pattern);
+      // The finding is reported against the manifest: the rule is what claims coverage, and the
+      // missing file has no line of its own to point at.
+      if (matched.length === 0) {
+        findings.push({
+          ruleId: rule.id,
+          file: ctx.configPath,
+          evidence: { coveredBy: true, tests: pattern, problem: 'no file matches it' },
+          identity: '',
+        });
+        continue;
+      }
+      const name = covered.name;
+      if (name === undefined) continue;
+      if (matched.some((file) => declaresTest(ctx.fs.read(file) ?? '', name))) continue;
+      findings.push({
+        ruleId: rule.id,
+        file: ctx.configPath,
+        evidence: {
+          coveredBy: true,
+          tests: pattern,
+          problem: `no test named '${name}' is declared in it`,
         },
         identity: '',
       });
@@ -97,8 +142,12 @@ export function createStructureProbe(): Probe {
     name: 'structure',
     handles: ['required-file', 'declared-field'],
 
+    appliesTo: (rules) =>
+      rules.some((rule) => rule.coveredBy !== undefined) ||
+      rules.some((rule) => rule.kind === 'required-file' || rule.kind === 'declared-field'),
+
     async run(ctx: RunCtx): Promise<RawFinding[] | Skip> {
-      const findings = requiredFileFindings(ctx);
+      const findings = [...requiredFileFindings(ctx), ...coveredByFindings(ctx)];
 
       const needsAst = ctx.rules.some(
         (rule) => rule.kind === 'declared-field' && rule.severity !== 'off',
